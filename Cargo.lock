@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "hemimizer"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "eframe",
  "raw-window-handle",
