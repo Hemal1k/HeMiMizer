@@ -342,7 +342,7 @@ impl HeMimizerApp {
             // back to the first page from the backup and from the start of the setup
             let back_to_choose = !self.about && matches!(self.phase, Phase::BackedUp | Phase::Start | Phase::Wizard(_)) && self.fresh;
             if self.about || back_to_choose {
-                if Btn::new("").icon(glyph::BACK).subtle().tip(tr("Back", "Zpět")).show(ui, &p).clicked() {
+                if Btn::new("").icon(glyph::BACK).subtle().show(ui, &p).clicked() {
                     acts.push(match self.phase {
                         _ if self.about => Action::About(false),
                         // the wizard page by page; the start goes back to its last page
@@ -371,7 +371,7 @@ impl HeMimizerApp {
             }
             if !self.about {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if Btn::new("").icon(glyph::SETTINGS).subtle().tip(tr("Settings", "Nastavení")).show(ui, &p).clicked() {
+                    if Btn::new("").icon(glyph::SETTINGS).subtle().show(ui, &p).clicked() {
                         acts.push(Action::About(true));
                     }
                 });
