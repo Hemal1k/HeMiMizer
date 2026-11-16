@@ -22,6 +22,7 @@ pub enum Kind {
     Chat,
     Office,
     Developer,
+    Creative,
 }
 
 pub const KINDS: &[(Kind, &str)] = &[
@@ -31,7 +32,30 @@ pub const KINDS: &[(Kind, &str)] = &[
     (Kind::Chat, "Chat, calls and e-mail"),
     (Kind::Office, "Office"),
     (Kind::Developer, "For developers"),
+    (Kind::Creative, "ArtCraft – free creative apps"),
 ];
+
+/// The icon of a section (Segoe Fluent Icons).
+pub fn kind_glyph(k: Kind) -> char {
+    match k {
+        Kind::Essentials => '\u{E7B8}',
+        Kind::Media => '\u{E8B2}',
+        Kind::Games => '\u{E7FC}',
+        Kind::Chat => '\u{E8BD}',
+        Kind::Office => '\u{E8A5}',
+        Kind::Developer => '\u{E943}',
+        Kind::Creative => '\u{E790}',
+        Kind::Other => '\u{E74C}',
+    }
+}
+
+/// A line under the title of a section.
+pub fn kind_note(k: Kind) -> &'static str {
+    match k {
+        Kind::Creative => "Open-source apps of getartcraft.com for pictures, video, sound and documents – still early versions",
+        _ => "",
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Source {
@@ -88,7 +112,6 @@ pub const ALL: &[Item] = &[
     // programs
     it("7zip", "7-Zip", "Archives (zip, 7z, rar…)", App, Essentials, Winget("7zip.7zip"), ""),
     it("winrar", "WinRAR", "Archives – a trial, then paid", App, Essentials, Winget("RARLab.WinRAR"), "https://www.win-rar.com/winrarlicense.html"),
-    it("everything", "Everything", "Finds any file at once", App, Essentials, Winget("voidtools.Everything"), ""),
     it("powertoys", "PowerToys", "Tools of Microsoft for power users", App, Essentials, Winget("Microsoft.PowerToys"), ""),
     it("notepadpp", "Notepad++", "Text and code editor", App, Essentials, Winget("Notepad++.Notepad++"), ""),
     it("acrobat", "Adobe Acrobat Reader", "PDF reader", App, Essentials, Winget("Adobe.Acrobat.Reader.64-bit"), "https://www.adobe.com/legal/terms.html"),
@@ -106,6 +129,8 @@ pub const ALL: &[Item] = &[
     it("steam", "Steam", "Games", App, Games, Winget("Valve.Steam"), "https://store.steampowered.com/subscriber_agreement/"),
     it("epic", "Epic Games Launcher", "Games", App, Games, Winget("EpicGames.EpicGamesLauncher"), "https://epicgames.com/eula"),
     it("gog", "GOG GALAXY", "Games", App, Games, Winget("GOG.Galaxy"), "https://www.gog.com/en/user_agreement"),
+    it("ubisoft", "Ubisoft Connect", "Games of Ubisoft", App, Games, Winget("Ubisoft.Connect"), "https://legal.ubi.com/termsofuse/"),
+    it("ea", "EA app", "Games of Electronic Arts", App, Games, Winget("ElectronicArts.EADesktop"), "https://tos.ea.com/legalapp/WEBTERMS/US/en/PC/"),
     it("discord", "Discord", "Chat and voice", App, Chat, Winget("Discord.Discord"), "https://discord.com/terms"),
     it("telegram", "Telegram", "Messages", App, Chat, Winget("Telegram.TelegramDesktop"), ""),
     it("whatsapp", "WhatsApp", "Messages and calls", App, Chat, Store("9NKSQGP7F2NH"), "https://www.whatsapp.com/legal/terms-of-service"),
@@ -120,9 +145,49 @@ pub const ALL: &[Item] = &[
     it("python", "Python 3.13", "Programming language", App, Developer, Winget("Python.Python.3.13"), ""),
     it("nodejs", "Node.js LTS", "JavaScript runtime", App, Developer, Winget("OpenJS.NodeJS.LTS"), ""),
     it("java", "Java 21 (Eclipse Temurin)", "Runs Java programs (Minecraft and others)", App, Developer, Winget("EclipseAdoptium.Temurin.21.JRE"), ""),
+    // ArtCraft (getartcraft.com): open-source creative apps, early versions
+    it("artcraft", "ArtCraft", "AI images and video, in one studio", App, Creative, Winget("ArtCraft.ArtCraft"), ""),
+    it("photocraft", "PhotoCraft", "Image editor", App, Creative, Winget("ArtCraft.PhotoCraft"), ""),
+    it("vectorcraft", "VectorCraft", "Vector illustration", App, Creative, Winget("ArtCraft.VectorCraft"), ""),
+    it("filmcraft", "FilmCraft", "Video editor", App, Creative, Winget("ArtCraft.FilmCraft"), ""),
+    it("lightcraft", "LightCraft", "Photo library and raw developer", App, Creative, Winget("ArtCraft.LightCraft"), ""),
+    it("pdfcraft", "PdfCraft", "Reads, combines, splits and secures PDFs", App, Creative, Winget("ArtCraft.PdfCraft"), ""),
+    it("effectcraft", "EffectCraft", "Motion graphics and visual effects", App, Creative, Winget("ArtCraft.EffectCraft"), ""),
+    it("designcraft", "DesignCraft", "Page layout and publishing", App, Creative, Winget("ArtCraft.DesignCraft"), ""),
+    it("texturecraft", "TextureCraft", "3D texture painting", App, Creative, Winget("ArtCraft.TextureCraft"), ""),
+    it("materialcraft", "MaterialCraft", "Procedural materials with nodes", App, Creative, Winget("ArtCraft.MaterialCraft"), ""),
+    it("soundcraft", "SoundCraft", "Records, edits and mixes audio", App, Creative, Winget("ArtCraft.SoundCraft"), ""),
+    it("wordcraft", "WordCraft", "Word processor", App, Creative, Winget("ArtCraft.WordCraft"), ""),
+    it("deckcraft", "DeckCraft", "Presentations", App, Creative, Winget("ArtCraft.DeckCraft"), ""),
+    it("gridcraft", "GridCraft", "Spreadsheets and data analysis", App, Creative, Winget("ArtCraft.GridCraft"), ""),
+    it("cadcraft", "CADCraft", "CAD and drafting", App, Creative, Winget("ArtCraft.CadCraft"), ""),
+    it("craftanything", "Craft Anything", "Learn how software works and build your own", App, Creative, Winget("ArtCraft.CraftAnything"), ""),
     // the HeMi app offered: HeMi Launcher (it installs and updates the others)
     it("hemilauncher", "HeMi Launcher", "Installs and updates the free HeMi apps (a dock, a photo converter, a notepad…)", Hemi, Other, GitHub("HeMiLauncher", "HeMiLauncher-Setup.exe"), ""),
 ];
+
+/// Programs that can be default apps (Windows does not let programs choose them): (catalog id, the part of the name
+/// under which Windows lists it in Default apps).
+pub const DEFAULT_APPS: &[(&str, &str)] = &[
+    ("chrome", "Chrome"),
+    ("firefox", "Firefox"),
+    ("brave", "Brave"),
+    ("opera", "Opera"),
+    ("vivaldi", "Vivaldi"),
+    ("vlc", "VLC"),
+    ("7zip", "7-Zip"),
+    ("winrar", "WinRAR"),
+    ("qbittorrent", "qBittorrent"),
+    ("acrobat", "Acrobat"),
+    ("notepadpp", "Notepad++"),
+    ("thunderbird", "Thunderbird"),
+    ("libreoffice", "LibreOffice"),
+];
+
+/// The default apps to set by hand for the programs of the plan.
+pub fn default_apps(plan: &crate::plan::Plan) -> Vec<&'static str> {
+    DEFAULT_APPS.iter().filter(|(id, _)| plan.has(id)).map(|(_, n)| *n).collect()
+}
 
 pub fn find(id: &str) -> Option<&'static Item> {
     ALL.iter().find(|i| i.id == id)

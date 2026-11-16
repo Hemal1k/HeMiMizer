@@ -58,7 +58,10 @@ const MICROSOFT: &[&str] = &[
 
 pub fn microsoft_apps(c: &Ctx) -> Res {
     c.log("Removing apps of Microsoft that are not needed");
-    remove_appx(MICROSOFT)?;
+    // Microsoft Teams stays when it was chosen in the wizard (the same package)
+    let keep: &[&str] = if crate::install::chosen("teams") { &["MSTeams", "MicrosoftTeams"] } else { &[] };
+    let list: Vec<&str> = MICROSOFT.iter().copied().filter(|n| !keep.contains(n)).collect();
+    remove_appx(&list)?;
     Ok(format!("{} apps checked and removed where present", MICROSOFT.len()))
 }
 

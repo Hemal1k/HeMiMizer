@@ -7,7 +7,7 @@ use crate::steps::{self, Event, Step};
 use crate::theme::{self, Palette, glyph};
 use crate::widgets::{Btn, Tone, card, info_bar, row_layout, section, two_lines};
 use crate::{config, downloads, drivers, programs, sys};
-use eframe::egui::{self, Align, CornerRadius, Id, Layout, Margin, RichText, Stroke, vec2};
+use eframe::egui::{self, Align, Color32, CornerRadius, Id, Layout, Margin, RichText, Stroke, pos2, vec2};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
@@ -30,7 +30,6 @@ enum Page {
     Hardware,
     Browser,
     Apps,
-    Licences,
     Windows,
     Settings,
     Folders,
@@ -69,8 +68,16 @@ enum Action {
     /// the browser: one or none
     Browser(Option<&'static str>),
     Offline(bool),
-    /// the licence terms accepted or not
+    /// the licence terms accepted or not (at the setup)
     Accept(bool),
+    /// the programs with licence terms left out (at the setup)
+    DropLicensed,
+    /// a page of the wizard already visited (the steps on top)
+    GoPage(Page),
+    /// a section folded or unfolded (by its title)
+    Fold(String),
+    /// a starting point of the page Windows: 0 = recommended, 1 = like this PC, 2 = nothing
+    Preset(u8),
     /// a step of Windows on or off
     WinOpt(&'static str, bool),
     AddFolder,
@@ -159,6 +166,14 @@ pub struct HeMimizerApp {
     found_drives: Vec<(String, String)>,
     /// the folder the backup goes to (empty = the folder of HeMimizer.exe)
     save_to: String,
+    /// the search on the page of the programs
+    search: String,
+    /// the sections folded (by their titles)
+    folded: std::collections::HashSet<String>,
+    /// how the single settings of Windows are on this PC (tweaks::ALL in order), read once before a backup
+    this_pc: Option<Vec<Option<bool>>>,
+    /// the furthest page of the wizard reached (its steps on top go back to any of them)
+    reached: usize,
 }
 
 impl HeMimizerApp {
@@ -236,7 +251,20 @@ impl HeMimizerApp {
             start_via_wizard: false,
             found_drives: Vec::new(),
             save_to: config::exe_dir().display().to_string(),
+            search: String::new(),
+            folded: ["Privacy and AI", "Taskbar and Start", "File Explorer", "System and games", "Updates and runtimes", "For developers", "ArtCraft – free creative apps"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            this_pc: None,
+            reached: 0,
         };
+        // the settings of the programs: on unless switched off (they are offered only for the programs chosen)
+        for (i, it) in app.backup_items.iter().enumerate() {
+            if crate::appdata::find(it.id).is_some() {
+                app.backup_on[i] = true;
+            }
+        }
         if mode == Mode::Resume {
             app.start(&cc.egui_ctx);
         }
@@ -363,12 +391,6 @@ impl HeMimizerApp {
                 }
             };
             ui.label(RichText::new(title).font(theme::display(28.0)).color(p.text));
-            if let Phase::Wizard(page) = self.phase {
-                let pages = self.pages();
-                let n = pages.iter().position(|x| *x == page).unwrap_or(0) + 1;
-                ui.add_space(8.0);
-                ui.label(RichText::new(format!("Step {n} of {}", pages.len())).size(13.0).color(p.text3));
-            }
             if !self.about {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if Btn::new("").icon(glyph::SETTINGS).subtle().show(ui, &p).clicked() {
@@ -377,7 +399,13 @@ impl HeMimizerApp {
                 });
             }
         });
-        ui.add_space(18.0);
+        if let (Phase::Wizard(page), false) = (self.phase, self.about) {
+            ui.add_space(10.0);
+            self.stepper(ui, page, acts);
+            ui.add_space(4.0);
+        } else {
+            ui.add_space(18.0);
+        }
     }
 
     /// Settings, as in the other HeMi apps: the theme, then About with the links side by side.
@@ -490,42 +518,101 @@ impl HeMimizerApp {
         );
     }
 
-    /// A program of the wizard: its name, a line, an optional tag ("Found on this PC") and a switch.
-    fn pick_row(ui: &mut egui::Ui, p: &Palette, item: &crate::catalog::Item, on: bool, tag: Option<&str>) -> bool {
-        let mut clicked = false;
-        card(ui, p, |ui| {
-            row_layout(ui, 36.0, |ui| {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(item.name).size(14.0).color(p.text));
-                        if let Some(t) = tag {
-                            ui.add_space(6.0);
-                            ui.label(RichText::new(t).size(12.0).color(p.accent_text));
-                        }
-                    });
-                    if !item.line.is_empty() {
-                        ui.add(egui::Label::new(RichText::new(item.line).size(12.0).color(p.text2)).truncate());
-                    }
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if crate::widgets::toggle(ui, p, on).clicked() {
-                        clicked = true;
-                    }
-                });
-            });
-        });
-        clicked
+    /// A small rounded tile with an icon in the accent colour.
+    fn icon_tile(ui: &mut egui::Ui, p: &Palette, g: char, size: f32) {
+        let (r, _) = ui.allocate_exact_size(vec2(size, size), egui::Sense::hover());
+        ui.painter().rect_filled(r, 7, theme::mix(p.card, p.accent, 0.20));
+        ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, g, theme::icon(size * 0.5), p.accent_text);
     }
 
-    /// Programs as cards in two columns (a long list fits on one screen).
-    fn pick_grid(&self, ui: &mut egui::Ui, items: &[&'static crate::catalog::Item], acts: &mut Vec<Action>) {
+    /// A card that switches something on or off – the whole card is the switch: an optional icon, the title with
+    /// small tags, a line under it and the toggle on the right. Returns true when clicked.
+    fn choice_card(ui: &mut egui::Ui, p: &Palette, icon: Option<char>, title: &str, line: &str, tags: &[(String, Color32)], on: bool) -> bool {
+        let resp = egui::Frame::new()
+            .fill(if on { theme::mix(p.card, p.accent, 0.07) } else { p.card })
+            .stroke(Stroke::new(1.0, if on { theme::mix(p.card_stroke, p.accent, 0.40) } else { p.card_stroke }))
+            .corner_radius(crate::widgets::CARD_RADIUS)
+            .inner_margin(Margin { left: 12, right: 14, top: 7, bottom: 7 })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                row_layout(ui, 36.0, |ui| {
+                    if let Some(g) = icon {
+                        Self::icon_tile(ui, p, g, 32.0);
+                        ui.add_space(8.0);
+                    }
+                    let text_w = (ui.available_width() - 52.0).max(60.0);
+                    ui.allocate_ui_with_layout(vec2(text_w, 36.0), Layout::top_down(Align::Min), |ui| {
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        ui.add_space(if line.is_empty() { 9.0 } else { 0.0 });
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.add(egui::Label::new(RichText::new(title).size(14.0).color(p.text)).truncate());
+                            for (t, c) in tags {
+                                ui.label(RichText::new(t.as_str()).size(11.5).color(*c));
+                            }
+                        });
+                        if !line.is_empty() {
+                            ui.add(egui::Label::new(RichText::new(line).size(12.0).color(p.text2)).truncate());
+                        }
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        crate::widgets::toggle(ui, p, on);
+                    });
+                });
+            })
+            .response
+            .interact(egui::Sense::click());
+        if resp.hovered() {
+            ui.painter().rect_stroke(resp.rect, crate::widgets::CARD_RADIUS, Stroke::new(1.0, p.accent), egui::StrokeKind::Inside);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        resp.clicked()
+    }
+
+    /// The head of a section that folds: an arrow, an icon, the title and how many are on; a click folds or unfolds it.
+    /// Returns whether it is open.
+    fn fold_head(&self, ui: &mut egui::Ui, icon: Option<char>, title: &str, on: usize, all: usize, force_open: bool, acts: &mut Vec<Action>) -> bool {
+        let p = self.p;
+        let open = force_open || !self.folded.contains(title);
+        let resp = ui
+            .horizontal(|ui| {
+                ui.set_min_height(30.0);
+                let arrow = if open { glyph::CHEVRON_DOWN } else { glyph::CHEVRON_RIGHT };
+                ui.label(RichText::new(arrow.to_string()).font(theme::icon(10.0)).color(p.text2));
+                ui.add_space(2.0);
+                if let Some(g) = icon {
+                    ui.label(RichText::new(g.to_string()).font(theme::icon(15.0)).color(p.accent_text));
+                    ui.add_space(2.0);
+                }
+                ui.label(RichText::new(title).font(theme::semibold(14.0)).color(p.text));
+                ui.add_space(4.0);
+                // how many are on, as a small pill
+                let text = format!("{on} of {all}");
+                let galley = ui.painter().layout_no_wrap(text, theme::body(11.5), if on > 0 { p.on_accent } else { p.text2 });
+                let (r, _) = ui.allocate_exact_size(galley.size() + vec2(14.0, 4.0), egui::Sense::hover());
+                ui.painter().rect_filled(r, 9, if on > 0 { p.accent } else { theme::mix(p.card, p.text3, 0.25) });
+                ui.painter().galley(r.center() - galley.size() / 2.0, galley, p.text);
+                ui.allocate_space(vec2(ui.available_width(), 1.0));
+            })
+            .response
+            .interact(egui::Sense::click());
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if resp.clicked() && !force_open {
+            acts.push(Action::Fold(title.to_string()));
+        }
+        open
+    }
+
+    /// Cards in two columns (a long list fits on one screen).
+    fn pick_grid(&self, ui: &mut egui::Ui, items: &[&'static crate::catalog::Item], icon: Option<char>, acts: &mut Vec<Action>) {
         let p = self.p;
         for pair in items.chunks(2) {
             ui.columns(2, |cols| {
                 for (col, item) in cols.iter_mut().zip(pair) {
                     let on = self.plan.has(item.id);
-                    if Self::pick_row(col, &p, item, on, None) {
+                    if Self::choice_card(col, &p, icon, item.name, item.line, &[], on) {
                         acts.push(Action::Pick(item.id, !on));
                     }
                 }
@@ -533,14 +620,10 @@ impl HeMimizerApp {
         }
     }
 
-    /// The pages of this wizard: the licences only when a program chosen has some; the settings and own folders only
-    /// before a backup.
+    /// The pages of this wizard: the settings and own folders only before a backup. (The licence terms are accepted
+    /// at the setup, when the programs are installed.)
     fn pages(&self) -> Vec<Page> {
-        let mut v = vec![Page::Hardware, Page::Browser, Page::Apps];
-        if !self.plan.licensed().is_empty() {
-            v.push(Page::Licences);
-        }
-        v.push(Page::Windows);
+        let mut v = vec![Page::Hardware, Page::Browser, Page::Apps, Page::Windows];
         if self.wizard_backup {
             v.push(Page::Settings);
             v.push(Page::Folders);
@@ -554,8 +637,7 @@ impl HeMimizerApp {
             Page::Hardware => "Drivers and the software of the maker",
             Page::Browser => "Browser",
             Page::Apps => "Programs",
-            Page::Licences => "Licence terms",
-            Page::Windows => "Windows",
+            Page::Windows => "What changes in Windows",
             Page::Settings => "Settings to take along",
             Page::Folders => "Your folders",
             Page::Save if self.wizard_backup => "Where to save the backup",
@@ -563,13 +645,157 @@ impl HeMimizerApp {
         }
     }
 
+    /// The name of a page in the steps on top.
+    fn page_short(&self, page: Page) -> &'static str {
+        match page {
+            Page::Hardware => "Drivers",
+            Page::Browser => "Browser",
+            Page::Apps => "Programs",
+            Page::Windows => "Windows",
+            Page::Settings => "Take along",
+            Page::Folders => "Folders",
+            Page::Save if self.wizard_backup => "Save",
+            Page::Save => "Finish",
+        }
+    }
+
     /// Can Next / Back up go on from this page?
     fn page_ok(&self, page: Page) -> bool {
         match page {
-            Page::Licences => self.plan.accepted,
             Page::Save => crate::plan::valid_pc_name(&self.plan.pc_name) && (!self.wizard_backup || !self.save_to.trim().is_empty()),
             _ => true,
         }
+    }
+
+    /// The steps of the wizard as a line of circles: done ones with a tick, the current one bigger; a visited page is
+    /// one click away.
+    fn stepper(&self, ui: &mut egui::Ui, page: Page, acts: &mut Vec<Action>) {
+        let p = self.p;
+        let pages = self.pages();
+        let cur = pages.iter().position(|x| *x == page).unwrap_or(0);
+        let n = pages.len();
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0), egui::Sense::hover());
+        let step = rect.width() / n as f32;
+        let cy = rect.top() + 13.0;
+        let x = |i: usize| rect.left() + step * (i as f32 + 0.5);
+        for i in 0..n.saturating_sub(1) {
+            let c = if i < cur { p.accent } else { p.card_stroke };
+            ui.painter().line_segment([pos2(x(i) + 15.0, cy), pos2(x(i + 1) - 15.0, cy)], Stroke::new(2.0, c));
+        }
+        for (i, pg) in pages.iter().enumerate() {
+            let center = pos2(x(i), cy);
+            let reach = i <= self.reached && i != cur;
+            let hit = egui::Rect::from_center_size(pos2(x(i), rect.top() + 25.0), vec2(step.min(110.0), 50.0));
+            let resp = ui.interact(hit, ui.scope_id().with(("wizard-step", i)), if reach { egui::Sense::click() } else { egui::Sense::hover() });
+            let hover = reach && resp.hovered();
+            let painter = ui.painter();
+            if i == cur {
+                painter.circle_filled(center, 15.0, theme::mix(p.bg, p.accent, 0.25));
+            }
+            let fill = if i <= cur { p.accent } else if i <= self.reached { theme::mix(p.bg, p.accent, 0.30) } else { p.bg };
+            painter.circle_filled(center, 11.0, fill);
+            if i > cur {
+                painter.circle_stroke(center, 11.0, Stroke::new(1.5, if hover { p.accent } else { p.card_stroke }));
+            }
+            if i < cur {
+                painter.text(center, egui::Align2::CENTER_CENTER, glyph::CHECK, theme::icon(11.0), p.on_accent);
+            } else {
+                let c = if i == cur { p.on_accent } else { p.text2 };
+                painter.text(center, egui::Align2::CENTER_CENTER, (i + 1).to_string(), theme::semibold(12.0), c);
+            }
+            let (font, color) = if i == cur { (theme::semibold(12.0), p.text) } else { (theme::body(12.0), if hover { p.accent_text } else { p.text3 }) };
+            painter.text(pos2(x(i), rect.top() + 40.0), egui::Align2::CENTER_CENTER, self.page_short(*pg), font, color);
+            if hover {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if resp.clicked() && reach {
+                acts.push(Action::GoPage(*pg));
+            }
+        }
+        ui.add_space(6.0);
+    }
+
+    /// The programs chosen that are games (for the texts that depend on them).
+    fn chosen_names(&self, ids: impl Iterator<Item = &'static str>) -> Vec<&'static str> {
+        ids.filter(|id| self.plan.has(id)).filter_map(crate::catalog::find).map(|i| i.name).collect()
+    }
+
+    fn games_chosen(&self) -> Vec<&'static str> {
+        self.chosen_names(crate::catalog::of_kind(crate::catalog::Kind::Games).map(|i| i.id))
+    }
+
+    /// The text of a step of Windows by what was chosen to install (else the text of the step).
+    fn option_detail(&self, id: &str, base: &'static str) -> String {
+        match id {
+            "startup" => {
+                let names = self.chosen_names(crate::windows::STARTS_ITSELF.iter().map(|(id, _)| *id));
+                if names.is_empty() {
+                    "Programs do not start with Windows by themselves – they can be switched back on in Task Manager".into()
+                } else {
+                    format!("{} and other programs do not start with Windows by themselves – switch them back on in Task Manager", names.join(", "))
+                }
+            }
+            "runtimes" => {
+                let games = self.games_chosen();
+                if games.is_empty() {
+                    "Visual C++, DirectX and .NET – many programs and games need them".into()
+                } else {
+                    format!("Visual C++, DirectX and .NET – {} and their games need them", games.join(", "))
+                }
+            }
+            "microsoft-apps" if self.plan.has("teams") => format!("{base} – Microsoft Teams stays, you chose it"),
+            "xbox-apps" if !self.games_chosen().is_empty() => "The Xbox app and Game Bar – keep them if you play games from the Xbox app or Game Pass".into(),
+            _ => base.to_string(),
+        }
+    }
+
+    /// The tags of a single setting: good for the programs chosen, and how it is on this PC now (before a backup).
+    fn tweak_tags(&self, index: usize, id: &str) -> Vec<(String, Color32)> {
+        let p = self.p;
+        let mut tags = Vec::new();
+        if ["games", "game-dvr", "mouse"].contains(&id) && !self.games_chosen().is_empty() {
+            tags.push(("Good for games".to_string(), p.accent_text));
+        }
+        if let Some(Some(now)) = self.this_pc.as_ref().and_then(|v| v.get(index)) {
+            tags.push(if *now { ("This PC: on".to_string(), p.success) } else { ("This PC: off".to_string(), p.text3) });
+        }
+        tags
+    }
+
+    /// The ids switched on by a preset of the page Windows: 0 = recommended, 1 = like this PC, 2 = nothing.
+    fn preset_ids(&self, preset: u8) -> Vec<String> {
+        match preset {
+            0 => crate::options::defaults(),
+            1 => {
+                let mut v = crate::options::defaults();
+                if let Some(now) = &self.this_pc {
+                    for (t, n) in crate::tweaks::ALL.iter().zip(now) {
+                        if let Some(on) = n {
+                            v.retain(|x| x != t.id);
+                            if *on {
+                                v.push(t.id.to_string());
+                            }
+                        }
+                    }
+                }
+                v
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn active_preset(&self) -> Option<u8> {
+        let mut now = self.plan.windows.clone().unwrap_or_else(crate::options::defaults);
+        now.sort();
+        let max = if self.wizard_backup { 3 } else { 2 };
+        (0..3u8).filter(|i| *i < max || *i == 2).find(|i| {
+            if *i == 1 && !self.wizard_backup {
+                return false;
+            }
+            let mut v = self.preset_ids(*i);
+            v.sort();
+            v == now
+        })
     }
 
     /// The pages of the wizard.
@@ -587,6 +813,10 @@ impl HeMimizerApp {
                 ui.ctx().request_repaint_after(Duration::from_millis(300));
             }
         }
+        // before a backup: how the single settings of Windows are on this PC (read once)
+        if page == Page::Windows && self.wizard_backup && self.this_pc.is_none() {
+            self.this_pc = Some(crate::tweaks::ALL.iter().map(|t| (t.now)()).collect());
+        }
         let intro = |ui: &mut egui::Ui, text: &str| {
             ui.add(egui::Label::new(RichText::new(text).size(13.0).color(p.text2)).wrap());
             ui.add_space(10.0);
@@ -597,7 +827,14 @@ impl HeMimizerApp {
                 match hw {
                     Some(h) => {
                         let text = if h.summary.is_empty() { "This PC".to_string() } else { format!("This PC: {}", h.summary) };
-                        intro(ui, &text);
+                        card(ui, &p, |ui| {
+                            row_layout(ui, 36.0, |ui| {
+                                Self::icon_tile(ui, &p, glyph::PC, 32.0);
+                                ui.add_space(8.0);
+                                ui.add(egui::Label::new(RichText::new(text).size(13.0).color(p.text)).wrap());
+                            });
+                        });
+                        ui.add_space(10.0);
                     }
                     None => {
                         ui.horizontal(|ui| {
@@ -610,8 +847,8 @@ impl HeMimizerApp {
                 section(ui, &p, "Drivers");
                 let suggested = hw.map(|h| h.suggested()).unwrap_or_default();
                 for item in catalog::of(Group::Driver) {
-                    let tag = suggested.contains(&item.id).then_some("Found on this PC");
-                    if Self::pick_row(ui, &p, item, self.plan.has(item.id), tag) {
+                    let tags: Vec<(String, Color32)> = if suggested.contains(&item.id) { vec![("Found on this PC".into(), p.accent_text)] } else { Vec::new() };
+                    if Self::choice_card(ui, &p, Some(glyph::DRIVER), item.name, item.line, &tags, self.plan.has(item.id)) {
                         acts.push(Action::Pick(item.id, !self.plan.has(item.id)));
                     }
                 }
@@ -623,8 +860,8 @@ impl HeMimizerApp {
                     let laptop = hw.is_some_and(|h| h.laptop);
                     section(ui, &p, if laptop { "Software of the maker of this laptop" } else { "Software of the maker" });
                     for item in shown {
-                        let tag = tools.contains(&item.id).then_some("For this PC");
-                        if Self::pick_row(ui, &p, item, self.plan.has(item.id), tag) {
+                        let tags: Vec<(String, Color32)> = if tools.contains(&item.id) { vec![("For this PC".into(), p.accent_text)] } else { Vec::new() };
+                        if Self::choice_card(ui, &p, Some(glyph::PC), item.name, item.line, &tags, self.plan.has(item.id)) {
                             acts.push(Action::Pick(item.id, !self.plan.has(item.id)));
                         }
                     }
@@ -639,7 +876,7 @@ impl HeMimizerApp {
                     ui.columns(2, |cols| {
                         for (col, item) in cols.iter_mut().zip(pair) {
                             let on = if item.id.is_empty() { none } else { self.plan.has(item.id) };
-                            if Self::pick_row(col, &p, item, on, None) {
+                            if Self::choice_card(col, &p, Some(glyph::GLOBE), item.name, item.line, &[], on) {
                                 acts.push(Action::Browser(if item.id.is_empty() || on { None } else { Some(item.id) }));
                             }
                         }
@@ -647,71 +884,63 @@ impl HeMimizerApp {
                 }
             }
             Page::Apps => {
-                intro(ui, "The newest versions, installed quietly through winget.");
+                let chosen = self.plan.apps.iter().filter_map(|id| catalog::find(id)).filter(|i| matches!(i.group, Group::App | Group::Hemi)).count();
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("The newest versions, installed quietly through winget.").size(13.0).color(p.text2));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new(format!("Chosen: {chosen}")).font(theme::semibold(13.0)).color(if chosen > 0 { p.accent_text } else { p.text3 }));
+                    });
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(glyph::SEARCH.to_string()).font(theme::icon(14.0)).color(p.text2));
+                    ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search the programs…").desired_width(f32::INFINITY).margin(vec2(10.0, 7.0)));
+                });
+                ui.add_space(10.0);
+                let q = self.search.trim().to_lowercase();
+                let fits = |i: &catalog::Item| q.is_empty() || i.name.to_lowercase().contains(&q) || i.line.to_lowercase().contains(&q);
+                let mut any = false;
                 for (kind, title) in catalog::KINDS {
-                    let items: Vec<&'static catalog::Item> = catalog::of_kind(*kind).collect();
-                    section(ui, &p, title);
-                    self.pick_grid(ui, &items, acts);
-                    ui.add_space(12.0);
+                    let items: Vec<&'static catalog::Item> = catalog::of_kind(*kind).filter(|i| fits(i)).collect();
+                    if items.is_empty() {
+                        continue;
+                    }
+                    any = true;
+                    let on = catalog::of_kind(*kind).filter(|i| self.plan.has(i.id)).count();
+                    let g = catalog::kind_glyph(*kind);
+                    if self.fold_head(ui, Some(g), title, on, catalog::of_kind(*kind).count(), !q.is_empty(), acts) {
+                        let note = catalog::kind_note(*kind);
+                        if !note.is_empty() {
+                            ui.add(egui::Label::new(RichText::new(note).size(12.0).color(p.text3)).wrap());
+                            ui.add_space(4.0);
+                        }
+                        self.pick_grid(ui, &items, Some(g), acts);
+                    }
+                    ui.add_space(8.0);
                 }
-                section(ui, &p, "HeMi apps");
-                let hemi: Vec<&'static catalog::Item> = catalog::of(Group::Hemi).collect();
-                for item in hemi {
-                    if Self::pick_row(ui, &p, item, self.plan.has(item.id), None) {
-                        acts.push(Action::Pick(item.id, !self.plan.has(item.id)));
+                let hemi: Vec<&'static catalog::Item> = catalog::of(Group::Hemi).filter(|i| fits(i)).collect();
+                if !hemi.is_empty() {
+                    any = true;
+                    let on = hemi.iter().filter(|i| self.plan.has(i.id)).count();
+                    if self.fold_head(ui, Some(glyph::HEMI), "HeMi apps", on, hemi.len(), !q.is_empty(), acts) {
+                        for item in hemi {
+                            if Self::choice_card(ui, &p, Some(glyph::HEMI), item.name, item.line, &[], self.plan.has(item.id)) {
+                                acts.push(Action::Pick(item.id, !self.plan.has(item.id)));
+                            }
+                        }
                     }
                 }
-            }
-            Page::Licences => {
-                intro(ui, "These programs have their own licence terms. HeMimizer installs them only when you accept them.");
-                for item in self.plan.licensed() {
+                if !any {
                     card(ui, &p, |ui| {
                         row_layout(ui, 32.0, |ui| {
-                            ui.label(RichText::new(item.name).size(14.0).color(p.text));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if Btn::new("Licence terms").icon(glyph::OPEN_LINK).subtle().show(ui, &p).clicked() {
-                                    acts.push(Action::Open(item.license.to_string()));
-                                }
-                            });
+                            ui.label(RichText::new(format!("No program fits “{}”.", self.search.trim())).size(13.0).color(p.text2));
                         });
                     });
                 }
-                ui.add_space(10.0);
-                let accept = catalog::Item {
-                    id: "",
-                    name: "I accept the licence terms of all programs above",
-                    line: "Without it, go back and leave them out.",
-                    group: Group::App,
-                    kind: catalog::Kind::Other,
-                    source: catalog::Source::Own,
-                    license: "",
-                };
-                if Self::pick_row(ui, &p, &accept, self.plan.accepted, None) {
-                    acts.push(Action::Accept(!self.plan.accepted));
-                }
             }
-            Page::Windows => {
-                intro(ui, "What HeMimizer changes in Windows. Most people want what is on; the rest changes how Windows looks and behaves.");
-                let groups: [(&str, &[&str]); 3] = [
-                    ("Clean up", &["restore-point", "ai", "microsoft-apps", "ad-software", "xbox-apps", "cleanup"]),
-                    ("Updates and runtimes", &["windows-update", "store", "runtimes", "no-wu-drivers", "features"]),
-                    ("Look and behaviour", &["explorer", "taskbar", "start", "games", "power", "hibernation", "startup", "sign-in", "sound-mouse", "network"]),
-                ];
-                for (title, ids) in groups {
-                    section(ui, &p, title);
-                    for id in ids {
-                        let Some(s) = self.steps.iter().find(|s| s.id == *id) else { continue };
-                        let row = catalog::Item { id: "", name: s.title.0, line: s.detail.0, group: Group::App, kind: catalog::Kind::Other, source: catalog::Source::Own, license: "" };
-                        let on = self.plan.windows_on(id);
-                        if Self::pick_row(ui, &p, &row, on, None) {
-                            acts.push(Action::WinOpt(s.id, !on));
-                        }
-                    }
-                    ui.add_space(12.0);
-                }
-            }
+            Page::Windows => self.windows_page(ui, acts),
             Page::Settings => {
-                intro(ui, "The settings of this PC and of its programs, put back on the new one.");
+                intro(ui, "What the new PC gets from this one. Everything is put back in its place after the reinstall.");
                 self.backup_page(ui, acts);
             }
             Page::Folders => {
@@ -720,6 +949,8 @@ impl HeMimizerApp {
                 for (i, f) in self.plan.folders.iter().enumerate() {
                     card(ui, &p, |ui| {
                         row_layout(ui, 32.0, |ui| {
+                            Self::icon_tile(ui, &p, glyph::FOLDER, 28.0);
+                            ui.add_space(8.0);
                             ui.label(RichText::new(crate::plan::show_folder(f)).size(14.0).color(p.text));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if Btn::new("").icon(glyph::CLOSE).subtle().tip("Remove").show(ui, &p).clicked() {
@@ -744,76 +975,177 @@ impl HeMimizerApp {
                     acts.push(Action::AddFolder);
                 }
             }
-            Page::Save => {
-                if self.wizard_backup {
-                    section(ui, &p, "Save to");
-                    card(ui, &p, |ui| {
-                        ui.add(egui::Label::new(RichText::new("The backup and HeMimizer itself go into this folder – a USB stick or a network drive is best. Start HeMimizer from there after reinstalling.").size(12.0).color(p.text2)).wrap());
-                        ui.add_space(6.0);
-                        if Self::path_row(ui, &p, &mut self.save_to, "Folder") {
-                            acts.push(Action::BrowseSaveTo);
-                        }
-                    });
-                    ui.add_space(14.0);
-                    section(ui, &p, "Installers");
-                    let offline = catalog::Item {
-                        id: "",
-                        name: "Download all installers now",
-                        line: "The new PC then installs everything without the internet (needs more space)",
-                        group: Group::App,
-                        kind: catalog::Kind::Other,
-                        source: catalog::Source::Own,
-                        license: "",
-                    };
-                    if Self::pick_row(ui, &p, &offline, self.plan.offline, None) {
-                        acts.push(Action::Offline(!self.plan.offline));
-                    }
-                    ui.add_space(14.0);
-                }
-                section(ui, &p, "Name of the PC");
-                card(ui, &p, |ui| {
-                    row_layout(ui, 36.0, |ui| {
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("New name").size(14.0).color(p.text));
-                            ui.label(RichText::new("Empty: Windows keeps its name. Letters, digits and hyphens, at most 15.").size(12.0).color(p.text2));
-                        });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.add(egui::TextEdit::singleline(&mut self.plan.pc_name).hint_text("e.g. HOME-PC").desired_width(200.0).margin(vec2(8.0, 6.0)));
-                        });
-                    });
-                });
-                if !crate::plan::valid_pc_name(&self.plan.pc_name) {
-                    ui.label(RichText::new("This name cannot be used.").size(12.0).color(p.critical));
-                }
-                ui.add_space(14.0);
-                let chosen: Vec<&str> = self.plan.apps.iter().filter_map(|id| catalog::find(id)).map(|i| i.name).collect();
-                section(ui, &p, "To install");
-                card(ui, &p, |ui| {
-                    let text = if chosen.is_empty() { "Nothing – only the settings of Windows.".to_string() } else { chosen.join(", ") };
-                    ui.add(egui::Label::new(RichText::new(text).size(13.0).color(p.text2)).wrap());
-                });
-            }
+            Page::Save => self.save_page(ui, acts),
         }
     }
 
-    /// What the backup takes; the user's own default can be saved.
+    /// The page "What changes in Windows": a starting point (recommended, like this PC, nothing), then the groups
+    /// of single changes to fine-tune.
+    fn windows_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        let p = self.p;
+        ui.add(egui::Label::new(RichText::new("Each change on its own. Pick a starting point, then open a group to fine-tune it.").size(13.0).color(p.text2)).wrap());
+        ui.add_space(10.0);
+        let active = self.active_preset();
+        let presets: Vec<(u8, &str, char, &str)> = [
+            (0u8, "Recommended", glyph::LIKE, "What most people want: clean-up, privacy and updates on – the look of Windows stays as it comes."),
+            (1, "Like this PC", glyph::PC, "Every setting Windows lets HeMimizer read is set as it is on this PC now – the new Windows looks and behaves the same."),
+            (2, "Change nothing", glyph::CLOSE, "Windows stays as it comes – HeMimizer only installs."),
+        ]
+        .into_iter()
+        .filter(|(i, ..)| *i != 1 || self.wizard_backup)
+        .collect();
+        ui.columns(presets.len(), |cols| {
+            for (col, (i, name, g, _)) in cols.iter_mut().zip(&presets) {
+                let on = active == Some(*i);
+                let resp = egui::Frame::new()
+                    .fill(if on { theme::mix(p.card, p.accent, 0.14) } else { p.card })
+                    .stroke(Stroke::new(if on { 1.5 } else { 1.0 }, if on { p.accent } else { p.card_stroke }))
+                    .corner_radius(crate::widgets::CARD_RADIUS)
+                    .inner_margin(Margin::symmetric(12, 10))
+                    .show(col, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.vertical_centered(|ui| {
+                            ui.label(RichText::new(g.to_string()).font(theme::icon(20.0)).color(if on { p.accent_text } else { p.text2 }));
+                            ui.add_space(2.0);
+                            ui.label(RichText::new(*name).font(theme::semibold(13.5)).color(p.text));
+                        });
+                    })
+                    .response
+                    .interact(egui::Sense::click());
+                if resp.hovered() {
+                    col.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    if !on {
+                        col.painter().rect_stroke(resp.rect, crate::widgets::CARD_RADIUS, Stroke::new(1.0, p.accent), egui::StrokeKind::Inside);
+                    }
+                }
+                if resp.clicked() {
+                    acts.push(Action::Preset(*i));
+                }
+            }
+        });
+        ui.add_space(6.0);
+        let explain = match active {
+            Some(i) => presets.iter().find(|x| x.0 == i).map(|x| x.3).unwrap_or(""),
+            None => "Your own choice – the groups below show what is on.",
+        };
+        ui.add(egui::Label::new(RichText::new(explain).size(12.0).color(p.text3)).wrap());
+        ui.add_space(12.0);
+
+        // the groups: the steps that are options, the single settings of tweaks.rs
+        enum Row {
+            Step(&'static str),
+            Tweak(usize),
+        }
+        let steps = |ids: &[&'static str]| ids.iter().map(|id| Row::Step(id)).collect::<Vec<_>>();
+        let tweaks_of = |g: crate::tweaks::Group| crate::tweaks::ALL.iter().enumerate().filter(move |(_, t)| t.group == g).map(|(i, _)| Row::Tweak(i));
+        let mut groups: Vec<(&str, char, Vec<Row>)> = vec![("Clean up", glyph::BROOM, steps(&["restore-point", "microsoft-apps", "ad-software", "xbox-apps", "hibernation", "cleanup"]))];
+        for (g, title, icon) in crate::tweaks::GROUPS {
+            let mut rows: Vec<Row> = tweaks_of(*g).collect();
+            if *g == crate::tweaks::Group::System {
+                rows.push(Row::Step("startup"));
+            }
+            groups.push((title, *icon, rows));
+        }
+        groups.push(("Updates and runtimes", glyph::SYNC, steps(&["windows-update", "store", "runtimes", "no-wu-drivers", "features"])));
+        for (title, icon, rows) in groups {
+            let id_of = |r: &Row| match r {
+                Row::Step(id) => *id,
+                Row::Tweak(i) => crate::tweaks::ALL[*i].id,
+            };
+            let on = rows.iter().filter(|r| self.plan.windows_on(id_of(r))).count();
+            if self.fold_head(ui, Some(icon), title, on, rows.len(), false, acts) {
+                for r in &rows {
+                    let id = id_of(r);
+                    let (name, detail, tags) = match r {
+                        Row::Step(id) => {
+                            let Some(s) = self.steps.iter().find(|s| s.id == *id) else { continue };
+                            (s.title.0, self.option_detail(id, s.detail.0), Vec::new())
+                        }
+                        Row::Tweak(i) => {
+                            let t = &crate::tweaks::ALL[*i];
+                            (t.title, t.detail.to_string(), self.tweak_tags(*i, t.id))
+                        }
+                    };
+                    let on = self.plan.windows_on(id);
+                    if Self::choice_card(ui, &p, None, name, &detail, &tags, on) {
+                        acts.push(Action::WinOpt(id, !on));
+                    }
+                }
+                ui.add_space(4.0);
+            }
+            ui.add_space(4.0);
+        }
+    }
+
+    /// Shown in the part "Take along" only when the program it belongs to was chosen: (part of config.rs, catalog id).
+    const PROGRAM_PARTS: &'static [(&'static str, &'static str)] = &[("vlc", "vlc"), ("qbittorrent", "qbittorrent"), ("brave", "brave"), ("steam", "steam"), ("amd", "amd-gpu"), ("oc", "amd-gpu")];
+
+    /// The item of the backup is offered: the settings of a program only when it was chosen; the installers and the
+    /// own folders have pages of their own; HeMiDock is not installed by the public HeMimizer.
+    fn backup_visible(&self, id: &str) -> bool {
+        if id == crate::backup::INSTALLERS || id == crate::backup::FOLDERS || id == "hemidock" {
+            return false;
+        }
+        if let Some((_, app)) = Self::PROGRAM_PARTS.iter().find(|(part, _)| *part == id) {
+            return self.plan.has(app);
+        }
+        if crate::appdata::find(id).is_some() {
+            return self.plan.has(id);
+        }
+        true
+    }
+
+    fn is_program_part(id: &str) -> bool {
+        Self::PROGRAM_PARTS.iter().any(|(part, _)| *part == id) || crate::appdata::find(id).is_some()
+    }
+
+    /// A line under a part of the backup.
+    fn part_detail(id: &str) -> &'static str {
+        match id {
+            "wallpaper" => "On the desktop and the lock screen",
+            "pins" => "Start and the taskbar",
+            "defender" => "The protection settings and exclusions",
+            "appearance" => "Dark mode and the accent colour",
+            "explorer" => "File extensions, hidden files and the view",
+            "notepad" => "Its settings",
+            "scaling" => "The size of text and apps, per monitor",
+            "steam" => "Where your games are (Defender leaves them out)",
+            "vlc" => "Settings and skin",
+            "qbittorrent" => "Settings and layout",
+            "brave" => "Look, settings and extensions – no history or passwords",
+            "amd" => "3D settings and Adrenalin",
+            "oc" => "The tuning profile exported in Adrenalin",
+            _ => "",
+        }
+    }
+
+    fn backup_glyph(id: &str) -> char {
+        match id {
+            "wallpaper" => glyph::PICTURE,
+            "pins" => glyph::PIN,
+            "defender" => glyph::SHIELD,
+            "appearance" => glyph::COLOR,
+            "explorer" => glyph::FOLDER,
+            "notepad" => glyph::NOTE,
+            "scaling" => glyph::MONITOR,
+            "drives" => glyph::DRIVE,
+            _ => crate::catalog::find(id).map(|i| crate::catalog::kind_glyph(i.kind)).unwrap_or(glyph::SETTINGS),
+        }
+    }
+
+    /// What the backup takes – before it: Windows and the programs chosen, with switches; while it runs: its state.
     fn backup_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
         let running = matches!(self.phase, Phase::BackingUp | Phase::BackedUp);
-        section(ui, &p, tr("What to back up", "Co zálohovat"));
-        for (i, item) in self.backup_items.iter().enumerate() {
-            if running && !self.backup_on[i] {
-                continue;
-            }
-            // the installers and the own folders have their own pages in the wizard
-            if !running && (item.id == crate::backup::INSTALLERS || item.id == crate::backup::FOLDERS) {
-                continue;
-            }
-            card(ui, &p, |ui| {
-                row_layout(ui, 36.0, |ui| {
-                    // the state while it runs, the switch before
-                    let state = &self.backup_done[i];
-                    if running {
+        if running {
+            section(ui, &p, tr("What is backed up", "Co se zálohuje"));
+            for (i, item) in self.backup_items.iter().enumerate() {
+                if !self.backup_on[i] {
+                    continue;
+                }
+                card(ui, &p, |ui| {
+                    row_layout(ui, 36.0, |ui| {
+                        let state = &self.backup_done[i];
                         match state {
                             Some(Ok(_)) => {
                                 ui.label(RichText::new(glyph::COMPLETED.to_string()).font(theme::icon(16.0)).color(p.success));
@@ -829,59 +1161,182 @@ impl HeMimizerApp {
                             }
                         }
                         ui.add_space(6.0);
-                    }
-                    let detail = match state {
-                        Some(Ok(t)) | Some(Err(t)) => t.lines().next().unwrap_or("").to_string(),
-                        None if self.backup_now == Some(i) => self.backup_log.clone(),
-                        // before the backup: the network drives it found (the passwords are asked on the new PC)
-                        None if item.id == "drives" && !running => {
-                            if self.found_drives.is_empty() {
-                                "No network drives on this PC".into()
-                            } else {
-                                let list: Vec<String> = self.found_drives.iter().map(|(l, s)| format!("{l}: {s}")).collect();
-                                format!("{} – the password is asked on the new PC", list.join(", "))
-                            }
-                        }
-                        None => String::new(),
-                    };
-                    if detail.is_empty() {
-                        ui.label(RichText::new(item.name).size(14.0).color(p.text));
-                    } else {
+                        let detail = match state {
+                            Some(Ok(t)) | Some(Err(t)) => t.lines().next().unwrap_or("").to_string(),
+                            None if self.backup_now == Some(i) => self.backup_log.clone(),
+                            None => String::new(),
+                        };
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 1.0;
+                            ui.add_space(if detail.is_empty() { 8.0 } else { 0.0 });
                             ui.label(RichText::new(item.name).size(14.0).color(p.text));
-                            let color = if matches!(state, Some(Err(_))) { p.critical } else { p.text2 };
-                            ui.add(egui::Label::new(RichText::new(detail).size(12.0).color(color)).wrap());
-                        });
-                    }
-                    // the OC profile cannot be read from Adrenalin: the file exported there is chosen here
-                    if running && item.id == "oc" && matches!(state, Some(Err(_))) {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if Btn::new("").icon(glyph::OPEN_FILE).subtle().tip("Choose the exported profile (.xml)").show(ui, &p).clicked() {
-                                acts.push(Action::PickOc(i));
+                            if !detail.is_empty() {
+                                let color = if matches!(state, Some(Err(_))) { p.critical } else { p.text2 };
+                                ui.add(egui::Label::new(RichText::new(detail).size(12.0).color(color)).wrap());
                             }
                         });
-                    }
-                    if !running {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if crate::widgets::toggle(ui, &p, self.backup_on[i]).clicked() {
-                                acts.push(Action::ToggleBackup(i));
-                            }
-                        });
-                    }
+                        // the OC profile cannot be read from Adrenalin: the file exported there is chosen here
+                        if item.id == "oc" && matches!(state, Some(Err(_))) {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if Btn::new("").icon(glyph::OPEN_FILE).subtle().tip("Choose the exported profile (.xml)").show(ui, &p).clicked() {
+                                    acts.push(Action::PickOc(i));
+                                }
+                            });
+                        }
+                    });
                 });
-            });
+            }
+            ui.add_space(6.0);
+            let where_ = format!("{} {}", tr("Into", "Do"), config::dir().parent().map(|d| d.display().to_string()).unwrap_or_default());
+            ui.label(RichText::new(where_).size(12.0).color(p.text3));
+            return;
         }
-        ui.add_space(6.0);
-        let where_ = format!(
-            "{} {}",
-            tr("Into", "Do"),
-            config::dir().parent().map(|d| d.display().to_string()).unwrap_or_default()
-        );
-        ui.label(RichText::new(where_).size(12.0).color(p.text3));
+        let row = |this: &Self, ui: &mut egui::Ui, i: usize, acts: &mut Vec<Action>| {
+            let item = &this.backup_items[i];
+            let mut tags: Vec<(String, Color32)> = Vec::new();
+            let detail = if item.id == "drives" {
+                if this.found_drives.is_empty() {
+                    "No network drives on this PC".to_string()
+                } else {
+                    let list: Vec<String> = this.found_drives.iter().map(|(l, s)| format!("{l}: {s}")).collect();
+                    format!("{} – the password is asked on the new PC", list.join(", "))
+                }
+            } else if let Some(d) = crate::appdata::find(item.id) {
+                if !crate::appdata::present(item.id) {
+                    tags.push(("Not on this PC".into(), p.text3));
+                }
+                d.what.to_string()
+            } else {
+                Self::part_detail(item.id).to_string()
+            };
+            if Self::choice_card(ui, &p, Some(Self::backup_glyph(item.id)), item.name, &detail, &tags, this.backup_on[i]) {
+                acts.push(Action::ToggleBackup(i));
+            }
+        };
+        let windows: Vec<usize> = (0..self.backup_items.len()).filter(|&i| self.backup_visible(self.backup_items[i].id) && !Self::is_program_part(self.backup_items[i].id)).collect();
+        let programs: Vec<usize> = (0..self.backup_items.len()).filter(|&i| self.backup_visible(self.backup_items[i].id) && Self::is_program_part(self.backup_items[i].id)).collect();
+        let on = |v: &[usize]| v.iter().filter(|&&i| self.backup_on[i]).count();
+        if self.fold_head(ui, Some(glyph::WINDOWS), "Windows", on(&windows), windows.len(), false, acts) {
+            for i in &windows {
+                row(self, ui, *i, acts);
+            }
+        }
+        ui.add_space(8.0);
+        if self.fold_head(ui, Some(glyph::APPS), "Your programs", on(&programs), programs.len(), false, acts) {
+            if programs.is_empty() {
+                card(ui, &p, |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new("None of the programs you chose keeps settings HeMimizer can take along – browsers, chat and game launchers bring them back when you sign in.")
+                                .size(13.0)
+                                .color(p.text2),
+                        )
+                        .wrap(),
+                    );
+                });
+            }
+            for i in &programs {
+                row(self, ui, *i, acts);
+            }
+        }
     }
 
-    /// Before the run: the installers of the drivers, the password of the NAS and Run.
+    /// A tile of the summary: an icon, a big number, what it counts.
+    fn tile(ui: &mut egui::Ui, p: &Palette, g: char, n: usize, label: &str) {
+        egui::Frame::new()
+            .fill(p.card)
+            .stroke(Stroke::new(1.0, p.card_stroke))
+            .corner_radius(crate::widgets::CARD_RADIUS)
+            .inner_margin(Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    Self::icon_tile(ui, p, g, 30.0);
+                    ui.add_space(6.0);
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.label(RichText::new(n.to_string()).font(theme::display(22.0)).color(p.text));
+                        ui.label(RichText::new(label).size(12.0).color(p.text2));
+                    });
+                });
+            });
+    }
+
+    /// The last page: a summary, where the backup goes (before a backup), the name of the PC, the list to install.
+    fn save_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        use crate::catalog::{self, Group};
+        let p = self.p;
+        let items: Vec<&'static catalog::Item> = self.plan.apps.iter().filter_map(|id| catalog::find(id)).collect();
+        let drivers = items.iter().filter(|i| matches!(i.group, Group::Driver | Group::Maker)).count();
+        let programs = items.len() - drivers;
+        let effective = self.plan.windows.clone().unwrap_or_else(crate::options::defaults);
+        let changes = effective.iter().filter(|id| crate::options::is_option(id) || crate::tweaks::find(id).is_some()).count();
+        let along = (0..self.backup_items.len()).filter(|&i| self.backup_on[i] && self.backup_visible(self.backup_items[i].id)).count();
+        let mut tiles: Vec<(char, usize, &str)> = vec![(glyph::DRIVER, drivers, "Drivers and tools"), (glyph::APPS, programs, "Programs"), (glyph::WINDOWS, changes, "Changes in Windows")];
+        if self.wizard_backup {
+            tiles.push((glyph::SAVE, along + usize::from(!self.plan.folders.is_empty()), "Taken along"));
+        }
+        ui.columns(tiles.len(), |cols| {
+            for (col, (g, n, label)) in cols.iter_mut().zip(&tiles) {
+                Self::tile(col, &p, *g, *n, label);
+            }
+        });
+        ui.add_space(14.0);
+        if self.wizard_backup {
+            section(ui, &p, "Save to");
+            card(ui, &p, |ui| {
+                ui.add(egui::Label::new(RichText::new("The backup and HeMimizer itself go into this folder – a USB stick or a network drive is best. Start HeMimizer from there after reinstalling.").size(12.0).color(p.text2)).wrap());
+                ui.add_space(6.0);
+                if Self::path_row(ui, &p, &mut self.save_to, "Folder") {
+                    acts.push(Action::BrowseSaveTo);
+                }
+            });
+            ui.add_space(14.0);
+            section(ui, &p, "Installers");
+            if Self::choice_card(ui, &p, Some(glyph::DOWNLOAD), "Download all installers now", "The new PC then installs everything without the internet (needs more space)", &[], self.plan.offline) {
+                acts.push(Action::Offline(!self.plan.offline));
+            }
+            ui.add_space(14.0);
+        }
+        section(ui, &p, "Name of the PC");
+        card(ui, &p, |ui| {
+            row_layout(ui, 36.0, |ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("New name").size(14.0).color(p.text));
+                    ui.label(RichText::new("Empty: Windows keeps its name. Letters, digits and hyphens, at most 15.").size(12.0).color(p.text2));
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut self.plan.pc_name).hint_text("e.g. HOME-PC").desired_width(200.0).margin(vec2(8.0, 6.0)));
+                });
+            });
+        });
+        if !crate::plan::valid_pc_name(&self.plan.pc_name) {
+            ui.label(RichText::new("This name cannot be used.").size(12.0).color(p.critical));
+        }
+        ui.add_space(14.0);
+        section(ui, &p, "To install");
+        if items.is_empty() {
+            card(ui, &p, |ui| {
+                ui.label(RichText::new("Nothing – only the settings of Windows.").size(13.0).color(p.text2));
+            });
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                for i in &items {
+                    egui::Frame::new().fill(p.card).stroke(Stroke::new(1.0, p.card_stroke)).corner_radius(12).inner_margin(Margin::symmetric(10, 4)).show(ui, |ui| {
+                        ui.label(RichText::new(i.name).size(12.5).color(p.text));
+                    });
+                }
+            });
+        }
+        if !self.plan.licensed().is_empty() {
+            ui.add_space(8.0);
+            let names: Vec<&str> = self.plan.licensed().iter().map(|i| i.name).collect();
+            ui.add(egui::Label::new(RichText::new(format!("Licence terms of {} are shown at the setup, before they are installed.", names.join(", "))).size(12.0).color(p.text3)).wrap());
+        }
+    }
+
+    /// Before the run: the licence terms of the programs, the installers of the drivers, the password of the NAS, Run.
     fn start_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
         let (tone, text) = if self.offline > 0 {
@@ -891,22 +1346,51 @@ impl HeMimizerApp {
         };
         info_bar(ui, &p, tone, &text, None);
         ui.add_space(10.0);
-        section(ui, &p, tr("Drivers (offline, right after the network drives)", "Ovladače (offline, hned po síťových discích)"));
-        let labels = [tr("AMD chipset driver", "Ovladač čipsetu AMD"), tr("AMD graphics driver (Adrenalin)", "Ovladač grafiky AMD (Adrenalin)")];
-        for (i, label) in labels.iter().enumerate() {
-            card(ui, &p, |ui| {
-                ui.add_space(4.0);
-                ui.label(RichText::new(*label).font(theme::semibold(14.0)).color(p.text));
-                ui.add_space(8.0);
-                if Self::path_row(ui, &p, &mut self.driver_paths[i], tr("Empty = skipped", "Prázdné = přeskočit")) {
-                    acts.push(Action::BrowseDriver(i));
-                }
-                ui.add_space(4.0);
-            });
+        let licensed = self.plan.licensed();
+        if !licensed.is_empty() {
+            section(ui, &p, "Licence terms");
+            ui.add(egui::Label::new(RichText::new("These programs have their own licence terms. HeMimizer installs them only when you accept them – or leave them out.").size(12.0).color(p.text2)).wrap());
+            ui.add_space(6.0);
+            for item in &licensed {
+                card(ui, &p, |ui| {
+                    row_layout(ui, 30.0, |ui| {
+                        ui.label(RichText::new(item.name).size(14.0).color(p.text));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if Btn::new("Licence terms").icon(glyph::OPEN_LINK).subtle().show(ui, &p).clicked() {
+                                acts.push(Action::Open(item.license.to_string()));
+                            }
+                        });
+                    });
+                });
+            }
+            ui.add_space(6.0);
+            if Self::choice_card(ui, &p, None, "I accept the licence terms of all programs above", "Needed to install them", &[], self.plan.accepted) {
+                acts.push(Action::Accept(!self.plan.accepted));
+            }
+            ui.add_space(4.0);
+            if !self.plan.accepted && Btn::new("Leave them out").show(ui, &p).clicked() {
+                acts.push(Action::DropLicensed);
+            }
+            ui.add_space(14.0);
         }
-        ui.add_space(14.0);
+        if self.plan.has("amd-chipset") || self.plan.has("amd-gpu") || !self.driver_paths.iter().all(|d| d.is_empty()) {
+            section(ui, &p, tr("AMD drivers (offline, right after the network drives)", "Ovladače AMD (offline, hned po síťových discích)"));
+            let labels = [tr("AMD chipset driver", "Ovladač čipsetu AMD"), tr("AMD graphics driver (Adrenalin)", "Ovladač grafiky AMD (Adrenalin)")];
+            for (i, label) in labels.iter().enumerate() {
+                card(ui, &p, |ui| {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(*label).font(theme::semibold(14.0)).color(p.text));
+                    ui.add_space(8.0);
+                    if Self::path_row(ui, &p, &mut self.driver_paths[i], tr("Empty = skipped", "Prázdné = přeskočit")) {
+                        acts.push(Action::BrowseDriver(i));
+                    }
+                    ui.add_space(4.0);
+                });
+            }
+            ui.add_space(14.0);
+        }
         if !self.passwords.is_empty() {
-            section(ui, &p, tr("Password for the NAS", "Heslo k NAS"));
+            section(ui, &p, tr("Password for the network drives", "Heslo k síťovým diskům"));
             for (server, user, pw) in self.passwords.iter_mut() {
                 let saved = programs::saved_user(server).is_some();
                 card(ui, &p, |ui| {
@@ -933,6 +1417,11 @@ impl HeMimizerApp {
                 .color(p.text3),
             );
         }
+    }
+
+    /// Run can start: no licence terms to accept, or accepted.
+    fn licences_ok(&self) -> bool {
+        self.plan.licensed().is_empty() || self.plan.accepted
     }
 
     /// Downloads that failed: choose the files by hand, try again, or go on.
@@ -1055,23 +1544,21 @@ impl HeMimizerApp {
         ui.add(egui::Label::new(RichText::new(bye).size(12.0).color(p.text3)).wrap());
         ui.add_space(14.0);
         section(ui, &p, tr("Left to do by hand", "Zbývá udělat ručně"));
-        card(ui, &p, |ui| {
-            row_layout(ui, 44.0, |ui| {
-                two_lines(
-                    ui,
-                    &p,
-                    tr("Default apps", "Výchozí aplikace"),
-                    tr("Windows does not let programs choose them – click Set default on each page.", "Windows nedovolí programům je nastavit – na každé stránce klikni na Nastavit jako výchozí."),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    for app in ["7-Zip", "qBittorrent", "VLC", "Brave"] {
-                        if Btn::new(app).show(ui, &p).clicked() {
+        // the default apps of the programs that were installed
+        let apps = crate::catalog::default_apps(&self.plan);
+        if !apps.is_empty() {
+            card(ui, &p, |ui| {
+                two_lines(ui, &p, "Default apps", "Windows does not let programs choose them – open each one and click Set default.");
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    for app in apps {
+                        if Btn::new(app).icon(glyph::OPEN_LINK).show(ui, &p).clicked() {
                             acts.push(Action::DefaultApps(app));
                         }
                     }
                 });
             });
-        });
+        }
         for n in &self.notes {
             card(ui, &p, |ui| {
                 row_layout(ui, 44.0, |ui| {
@@ -1165,7 +1652,7 @@ impl HeMimizerApp {
                     }
                 }
                 Phase::Start => {
-                    if Btn::new(tr("Run", "Spustit")).icon(glyph::PLAY).accent().show(ui, &p).clicked() {
+                    if Btn::new(tr("Run", "Spustit")).icon(glyph::PLAY).accent().enabled(self.licences_ok()).show(ui, &p).clicked() {
                         acts.push(Action::Start);
                     }
                     if Btn::new(tr("Close", "Zavřít")).show(ui, &p).clicked() {
@@ -1244,6 +1731,8 @@ impl HeMimizerApp {
                 Action::StartWizard(backup) => {
                     self.wizard_backup = backup;
                     self.phase = Phase::Wizard(Page::Hardware);
+                    self.reached = 0;
+                    self.search.clear();
                     if backup {
                         self.backup_done.iter_mut().for_each(|d| *d = None);
                         // the network drives found now: on when there are some, off when none
@@ -1259,6 +1748,7 @@ impl HeMimizerApp {
                         let i = pages.iter().position(|x| *x == page).unwrap_or(0);
                         if i + 1 < pages.len() {
                             self.phase = Phase::Wizard(pages[i + 1]);
+                            self.reached = self.reached.max(i + 1);
                         } else {
                             // the end of the wizard on the new PC: the choices for this run, then the start page
                             if let Err(e) = self.plan.save() {
@@ -1281,7 +1771,23 @@ impl HeMimizerApp {
                         Phase::Start if self.start_via_wizard => Phase::Wizard(Page::Save),
                         _ => Phase::Choose,
                     };
-                }                Action::Pick(id, on) => {
+                }
+                Action::GoPage(page) => self.phase = Phase::Wizard(page),
+                Action::Fold(title) => {
+                    if !self.folded.remove(&title) {
+                        self.folded.insert(title);
+                    }
+                }
+                Action::Preset(i) => {
+                    self.plan.windows = if i == 0 { None } else { Some(self.preset_ids(i)) };
+                }
+                Action::DropLicensed => {
+                    self.plan.apps.retain(|id| crate::catalog::find(id).is_none_or(|i| i.license.is_empty()));
+                    if let Err(e) = self.plan.save() {
+                        sys::log(&format!("plan.json: {e}"));
+                    }
+                }
+                Action::Pick(id, on) => {
                     self.plan.set(id, on);
                     // a program with licence terms added: they are to be accepted again
                     if on && crate::catalog::find(id).is_some_and(|i| !i.license.is_empty()) {
@@ -1297,7 +1803,13 @@ impl HeMimizerApp {
                     }
                 }
                 Action::Offline(on) => self.plan.offline = on,
-                Action::Accept(on) => self.plan.accepted = on,
+                Action::Accept(on) => {
+                    // at the setup: saved at once, the steps read the plan from its file
+                    self.plan.accepted = on;
+                    if let Err(e) = self.plan.save() {
+                        sys::log(&format!("plan.json: {e}"));
+                    }
+                }
                 Action::WinOpt(id, on) => self.plan.set_windows(id, on),
                 Action::AddFolder => {
                     if let Some(d) = rfd::FileDialog::new().set_title("A folder to back up").pick_folder() {
@@ -1340,6 +1852,12 @@ impl HeMimizerApp {
                     // the folder chosen for the backup (HeMimizer.exe is copied there at the end)
                     let to = std::path::PathBuf::from(self.save_to.trim().trim_matches('"'));
                     config::set_save_to((!to.as_os_str().is_empty() && to != config::exe_dir()).then_some(to));
+                    // what the page did not offer (the settings of programs not chosen) stays out
+                    for i in 0..self.backup_items.len() {
+                        if !self.backup_visible(self.backup_items[i].id) {
+                            self.backup_on[i] = false;
+                        }
+                    }
                     // the wizard decides the installers and the own folders
                     if let Some(i) = self.backup_items.iter().position(|it| it.id == crate::backup::INSTALLERS) {
                         self.backup_on[i] = self.plan.offline;
@@ -1501,7 +2019,16 @@ impl eframe::App for HeMimizerApp {
                 self.about_page(ui, &mut acts);
                 return;
             }
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            // every page starts at its top
+            let page_key = match self.phase {
+                Phase::Wizard(page) => 10 + page as usize,
+                Phase::Choose => 0,
+                Phase::BackingUp | Phase::BackedUp => 1,
+                Phase::Start => 2,
+                Phase::Running => 3,
+                Phase::Finished => 4,
+            };
+            egui::ScrollArea::vertical().id_salt(page_key).auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
                 match self.phase {
                     Phase::Choose => self.choose_page(ui, &mut acts),

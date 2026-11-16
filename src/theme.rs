@@ -48,6 +48,25 @@ pub mod glyph {
     pub const FOLDER: char = '\u{E8B7}';
     pub const OPEN_FILE: char = '\u{E8E5}';
     pub const OPEN_LINK: char = '\u{E8A7}';
+    pub const CHEVRON_RIGHT: char = '\u{E76C}';
+    pub const CHECK: char = '\u{E73E}';
+    pub const DRIVER: char = '\u{E90F}';
+    pub const GLOBE: char = '\u{E774}';
+    pub const SEARCH: char = '\u{E721}';
+    pub const HEMI: char = '\u{E734}';
+    pub const LIKE: char = '\u{E8E1}';
+    pub const BROOM: char = '\u{E74D}';
+    pub const SYNC: char = '\u{E895}';
+    pub const PICTURE: char = '\u{E8B9}';
+    pub const PIN: char = '\u{E718}';
+    pub const SHIELD: char = '\u{EA18}';
+    pub const COLOR: char = '\u{E790}';
+    pub const NOTE: char = '\u{E70B}';
+    pub const MONITOR: char = '\u{E7F4}';
+    pub const DRIVE: char = '\u{E8CE}';
+    pub const WINDOWS: char = '\u{E737}';
+    pub const APPS: char = '\u{E71D}';
+    pub const DOWNLOAD: char = '\u{E896}';
 }
 
 /// Everything the colours depend on; read again every few seconds and compared.

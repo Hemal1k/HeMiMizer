@@ -20,7 +20,6 @@ pub enum Group {
     Programs,
     Drivers,
     Windows,
-    Privacy,
     Cleanup,
 }
 
@@ -242,22 +241,29 @@ pub fn all() -> Vec<Step> {
         step!(
             "explorer",
             Windows,
-            "File Explorer and Recycle Bin",
-            "Průzkumník a koš",
-            "Opens This PC, no Home and Gallery, no recent files; no Recycle Bin and no icon of it",
-            "Otevírá Tento počítač, bez Domů a Galerie, bez nedávných souborů; bez koše a jeho ikony",
+            "File Explorer view",
+            "Zobrazení Průzkumníka",
+            "The view of File Explorer from the backup",
+            "Zobrazení Průzkumníka ze zálohy",
             windows::explorer
         ),
-        step!("taskbar", Windows, "Taskbar", "Hlavní panel", "No search, Task view, Resume, emoji and pen; centred", "Bez hledání, zobrazení úkolů, Pokračovat, emoji a pera; na střed", windows::taskbar),
-        step!("start", Windows, "Start", "Nabídka Start", "Small, no recommendations, recent files and account notifications", "Malá, bez doporučení, nedávných souborů a oznámení účtu", windows::start_menu),
         step!(
-            "games",
+            "tweaks",
             Windows,
-            "Games",
-            "Hry",
-            "Game Mode, GPU scheduling, windowed-game optimizations; no background recording, no Game Bar on the controller",
-            "Herní režim, plánování GPU, optimalizace her v okně; bez nahrávání na pozadí a herního panelu na ovladači",
-            windows::games
+            "Windows settings",
+            "Nastavení Windows",
+            "The settings of Windows chosen in the wizard",
+            "Nastavení Windows zvolená v průvodci",
+            crate::tweaks::run
+        ),
+        step!(
+            "app-settings",
+            Programs,
+            "Settings of your programs",
+            "Nastavení tvých programů",
+            "The settings of the programs, from the backup",
+            "Nastavení programů ze zálohy",
+            crate::appdata::restore
         ),
         step!(
             "windows-update",
@@ -268,35 +274,8 @@ pub fn all() -> Vec<Step> {
             "Nainstaluje všechny aktualizace kromě ovladačů; další produkty Microsoftu zapnuté, stahování z jiných PC vypnuté",
             windows::windows_update
         ),
-        step!(
-            "sign-in",
-            Windows,
-            "Sign-in",
-            "Přihlášení",
-            "No restarting apps, no e-mail on the sign-in screen, no automatic sign-in after updates",
-            "Bez obnovy aplikací, bez e-mailu na přihlašovací obrazovce, bez přihlášení po aktualizaci",
-            windows::sign_in
-        ),
-        step!(
-            "sound-mouse",
-            Windows,
-            "Sound and mouse",
-            "Zvuk a myš",
-            "No startup sound, no ducking during calls, Enhance pointer precision off",
-            "Bez zvuku při startu, bez ztlumení při hovorech, přesnost ukazatele vypnutá",
-            windows::sound_mouse
-        ),
         step!("notepad", Windows, "Notepad", "Poznámkový blok", "The settings from the backup", "Nastavení ze zálohy", windows::notepad),
         step!("calculator", Windows, "Calculator", "Kalkulačka", "Uninstalled", "Odinstalovat", windows::calculator),
-        step!(
-            "power",
-            Windows,
-            "Power",
-            "Napájení",
-            "High performance, display off after 10 min, never sleep, power button shuts down, no hibernation",
-            "Vysoký výkon, displej po 10 min, nikdy neuspávat, tlačítko vypíná, bez hibernace",
-            windows::power
-        ),
         step!(
             "restore",
             Windows,
@@ -314,15 +293,6 @@ pub fn all() -> Vec<Step> {
             "Dark mode and the accent colour from the backup",
             "Tmavý režim a barva zvýraznění ze zálohy",
             windows::appearance
-        ),
-        step!(
-            "network",
-            Windows,
-            "Network",
-            "Síť",
-            "Private network with network discovery; encrypted DNS of Cloudflare (DoH)",
-            "Soukromá síť se zjišťováním sítě; šifrované DNS Cloudflare (DoH)",
-            windows::network
         ),
         step!(
             "defender",
@@ -353,15 +323,6 @@ pub fn all() -> Vec<Step> {
         ),
         step!("pc-name", Windows, "PC name", "Název PC", "The name of the PC", "Název počítače", windows::rename_pc),
         step!(
-            "ai",
-            Privacy,
-            "AI and annoyances off",
-            "Vypnout AI a otravné funkce",
-            "Copilot, Recall, Click to Do, AI in Paint / Notepad / Edge, widgets, Bing, telemetry, ads, tips",
-            "Copilot, Recall, Click to Do, AI v Malování / Poznámkovém bloku / Edge, widgety, Bing, telemetrie, reklamy, tipy",
-            windows::ai_off
-        ),
-        step!(
             "cleanup",
             Cleanup,
             "Clean up",
@@ -378,9 +339,9 @@ pub fn all() -> Vec<Step> {
     // Microsoft Store, Windows features (.NET 3.5 comes from Windows Update) and Windows Update – again after every
     // restart until nothing is left –, and the clean-up last (it also deletes the downloaded updates)
     const ORDER: &[&str] = &[
-        "restore-point", "offline", "network", "drives", "no-wu-drivers", "chipset", "gpu", "gpu-settings", "display", "7zip", "vlc", "brave", "steam", "qbittorrent", "programs",
-        "runtimes", "appearance", "wallpaper", "explorer", "taskbar", "start", "games", "defender", "sign-in", "sound-mouse", "notepad", "calculator",
-        "power", "hibernation", "restore", "startup", "pins", "folders", "pc-name", "ai", "microsoft-apps", "xbox-apps", "ad-software", "internet", "downloads", "hemidock", "store", "features", "windows-update", "cleanup",
+        "restore-point", "offline", "drives", "no-wu-drivers", "chipset", "gpu", "gpu-settings", "display", "7zip", "vlc", "brave", "steam", "qbittorrent", "programs",
+        "app-settings", "runtimes", "appearance", "wallpaper", "explorer", "tweaks", "defender", "notepad", "calculator",
+        "hibernation", "restore", "startup", "pins", "folders", "pc-name", "microsoft-apps", "xbox-apps", "ad-software", "internet", "downloads", "hemidock", "store", "features", "windows-update", "cleanup",
     ];
     v.sort_by_key(|s| ORDER.iter().position(|o| *o == s.id).unwrap_or(usize::MAX));
     for s in v.iter_mut() {
@@ -501,10 +462,13 @@ fn write_todo() -> Option<PathBuf> {
     let dir = sys::log_path().parent()?.to_path_buf();
     let mut t = String::new();
     t.push_str(tr("HeMimizer – left to do by hand\r\n\r\n", "HeMimizer – zbývá udělat ručně\r\n\r\n"));
-    t.push_str(tr(
-        "- Default apps: Settings → Apps → Default apps → Brave, VLC, qBittorrent, 7-Zip → Set default (Windows does not let programs choose them).\r\n",
-        "- Výchozí aplikace: Nastavení → Aplikace → Výchozí aplikace → Brave, VLC, qBittorrent, 7-Zip → Nastavit jako výchozí (Windows nedovolí programům je nastavit).\r\n",
-    ));
+    let apps = crate::catalog::default_apps(&crate::plan::Plan::load().unwrap_or_default());
+    if !apps.is_empty() {
+        t.push_str(&format!(
+            "- Default apps: Settings → Apps → Default apps → {} → Set default (Windows does not let programs choose them).\r\n",
+            apps.join(", ")
+        ));
+    }
     if let Ok(s) = std::fs::read_to_string(todo_file()) {
         for l in s.lines().filter(|l| !l.trim().is_empty()) {
             t.push_str(l);

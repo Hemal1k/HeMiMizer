@@ -5,8 +5,6 @@ use crate::i18n::tr;
 use crate::steps::{Ctx, Res};
 use crate::sys::{self, Root};
 
-const ADV: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
-const EXPLORER: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer";
 const CDM: &str = r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager";
 
 // ---------------------------------------------------------------- Windows features
@@ -94,48 +92,12 @@ pub fn wallpaper(_c: &Ctx) -> Res {
 
 // ---------------------------------------------------------------- File Explorer, Recycle Bin
 
+/// The view of File Explorer from the backup (file extensions, hidden files…); the rest is in the single settings.
 pub fn explorer(_c: &Ctx) -> Res {
-    // the view: file extensions, hidden files … as captured
-    if config::has("explorer-view.reg") {
-        sys::reg_import(&config::text("explorer-view.reg", true))?;
+    if !config::has("explorer-view.reg") {
+        return Ok(config::not_backed_up());
     }
-    // Folder options: open This PC, no recent / frequent items, include account-based insights
-    sys::dwords(Root::Hkcu, ADV, &[("LaunchTo", 1), ("ShowCloudFilesInQuickAccess", 1), ("ShowSyncProviderNotifications", 0)])?;
-    sys::dwords(Root::Hkcu, EXPLORER, &[("ShowRecent", 0), ("ShowFrequent", 0)])?;
-    // no Home and no Gallery in the navigation pane (for this user; the folders open This PC anyway)
-    for clsid in ["{f874310e-b6b7-47dc-bc84-b9e6b38f5903}", "{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}"] {
-        sys::set_dword(Root::Hkcu, &format!(r"Software\Classes\CLSID\{clsid}"), "System.IsPinnedToNameSpaceTree", 0)?;
-    }
-    // no Recycle Bin: files are deleted at once, and no icon on the desktop
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoRecycleFiles", 1)?;
-    let bin = "{645FF040-5081-101B-9F08-00AA002F954E}";
-    sys::set_dword(Root::Hkcu, &format!(r"{EXPLORER}\HideDesktopIcons\NewStartPanel"), bin, 1)?;
-    sys::set_dword(Root::Hkcu, &format!(r"{EXPLORER}\HideDesktopIcons\ClassicStartMenu"), bin, 1)?;
-    Ok(String::new())
-}
-
-// ---------------------------------------------------------------- taskbar and Start
-
-pub fn taskbar(_c: &Ctx) -> Res {
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Search", "SearchboxTaskbarMode", 0)?;
-    sys::dwords(Root::Hkcu, ADV, &[("ShowTaskViewButton", 0), ("TaskbarAl", 1), ("TaskbarMn", 0), ("ShowCopilotButton", 0)])?;
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\CrossDeviceResume\Configuration", "IsResumeAllowed", 0)?;
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\TabletTip\1.7", "EmojiAndMoreIconVisibilityState", 0)?;
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\PenWorkspace", "PenWorkspaceButtonDesiredVisibility", 0)?;
-    Ok(String::new())
-}
-
-pub fn start_menu(_c: &Ctx) -> Res {
-    sys::dwords(
-        Root::Hkcu,
-        ADV,
-        &[("Start_TrackProgs", 0), ("Start_TrackDocs", 0), ("Start_IrisRecommendations", 0), ("Start_AccountNotifications", 0), ("Start_Layout", 1)],
-    )?;
-    sys::dwords(
-        Root::Hkcu,
-        r"Software\Microsoft\Windows\CurrentVersion\Start",
-        &[("ShowRecentList", 0), ("ShowFrequentList", 0), ("StartMenuSize", 1), ("AllAppsViewMode", 1)],
-    )?;
+    sys::reg_import(&config::text("explorer-view.reg", true))?;
     Ok(String::new())
 }
 
@@ -195,35 +157,6 @@ pub fn appearance(_c: &Ctx) -> Res {
     }
     sys::settings_changed();
     Ok(if config::has("appearance.reg") { tr("Colours from the backup", "Barvy ze zálohy").into() } else { config::not_backed_up() })
-}
-
-// ---------------------------------------------------------------- network
-
-/// The network as private (with network discovery, so the NAS is seen) and DNS of Cloudflare, encrypted (DoH).
-/// A NAS name like name.local is found through mDNS / LLMNR in the local network, not through DNS, so it keeps working.
-pub fn network(c: &Ctx) -> Res {
-    c.log(tr("Private network, network discovery", "Soukromá síť, zjišťování sítě"));
-    sys::ps(
-        "Get-NetConnectionProfile | Where-Object NetworkCategory -ne 'DomainAuthenticated' | Set-NetConnectionProfile -NetworkCategory Private; \
-         Get-NetFirewallRule -Group '@FirewallAPI.dll,-32752' | Where-Object { $_.Profile -match 'Private|Any' } | Enable-NetFirewallRule",
-    )?;
-    c.log(tr("Encrypted DNS (Cloudflare)", "Šifrované DNS (Cloudflare)"));
-    sys::ps(
-        r#"
-foreach ($ip in '1.1.1.1','1.0.0.1','2606:4700:4700::1111','2606:4700:4700::1001') {
-  if (Get-DnsClientDohServerAddress -ServerAddress $ip -ErrorAction SilentlyContinue) {
-    Set-DnsClientDohServerAddress -ServerAddress $ip -AutoUpgrade $true -AllowFallbackToUdp $false | Out-Null
-  } else {
-    Add-DnsClientDohServerAddress -ServerAddress $ip -DohTemplate 'https://cloudflare-dns.com/dns-query' -AutoUpgrade $true -AllowFallbackToUdp $false | Out-Null
-  }
-}
-Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | ForEach-Object {
-  Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ServerAddresses '1.1.1.1','1.0.0.1','2606:4700:4700::1111','2606:4700:4700::1001'
-}
-Clear-DnsClientCache
-"#,
-    )?;
-    Ok("1.1.1.1 / 1.0.0.1 (DoH)".into())
 }
 
 // ---------------------------------------------------------------- Defender
@@ -431,11 +364,27 @@ pub fn pins(c: &Ctx) -> Res {
 /// Kept starting with Windows; everything else in Run is switched off as in Task Manager → Startup apps
 /// (StartupApproved, so it can be switched on there again).
 /// (The updater of Brave is no browser window – without it Brave would not update.)
-const STARTUP_KEEP: &[&str] = &["HeMiDock", "SecurityHealth", "BraveSoftware Update"];
-/// Switched off ahead, before the programs add themselves (Steam does at its first start).
-const STARTUP_AHEAD: &[&str] = &["Steam", "Discord", "EpicGamesLauncher", "Spotify", "OneDrive"];
+const STARTUP_KEEP: &[&str] = &["HeMiDock", "HeMiLauncher", "SecurityHealth", "BraveSoftware Update"];
+/// The programs of the wizard that add themselves to the start of Windows: (catalog id, the name of their Run value).
+/// They are switched off ahead, before the programs add themselves (Steam does at its first start).
+pub const STARTS_ITSELF: &[(&str, &str)] = &[
+    ("steam", "Steam"),
+    ("discord", "Discord"),
+    ("epic", "EpicGamesLauncher"),
+    ("spotify", "Spotify"),
+    ("gog", "GogGalaxy"),
+    ("ubisoft", "Ubisoft Connect"),
+    ("ea", "EADM"),
+    ("teams", "com.squirrel.Teams.Teams"),
+    ("slack", "com.squirrel.slack.slack"),
+    ("zoom", "Zoom"),
+    ("telegram", "Telegram Desktop"),
+    ("qbittorrent", "qBittorrent"),
+];
 
 pub fn startup_apps(_c: &Ctx) -> Res {
+    let plan = crate::plan::Plan::load().unwrap_or_default();
+    let ahead: Vec<&str> = STARTS_ITSELF.iter().filter(|(id, _)| plan.has(id)).map(|(_, run)| *run).chain(["OneDrive"]).collect();
     // 03 = disabled, then the time of the change (zero is fine)
     let off = [3u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     let approved = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved";
@@ -447,7 +396,7 @@ pub fn startup_apps(_c: &Ctx) -> Res {
     ] {
         let mut names = sys::value_names(root, run);
         if matches!(root, Root::Hkcu) {
-            names.extend(STARTUP_AHEAD.iter().map(|s| s.to_string()));
+            names.extend(ahead.iter().map(|s| s.to_string()));
         }
         for n in names {
             if STARTUP_KEEP.iter().any(|k| n.eq_ignore_ascii_case(k)) {
@@ -461,22 +410,6 @@ pub fn startup_apps(_c: &Ctx) -> Res {
         }
     }
     Ok(done.join(", "))
-}
-
-/// Game Mode, hardware-accelerated GPU scheduling, optimizations for windowed games (no Auto HDR),
-/// no background recording, and the controller does not open Game Bar.
-pub fn games(_c: &Ctx) -> Res {
-    sys::dwords(
-        Root::Hkcu,
-        r"Software\Microsoft\GameBar",
-        &[("AutoGameModeEnabled", 1), ("AllowAutoGameMode", 1), ("UseNexusForGameBarEnabled", 0), ("GamepadNexusChordEnabled", 0)],
-    )?;
-    sys::set_dword(Root::Hklm, r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers", "HwSchMode", 2)?;
-    sys::set_sz(Root::Hkcu, r"Software\Microsoft\DirectX\UserGpuPreferences", "DirectXUserGlobalSettings", "AutoHDREnable=0;SwapEffectUpgradeEnable=1;")?;
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\GameDVR", "AppCaptureEnabled", 0)?;
-    sys::set_dword(Root::Hkcu, r"System\GameConfigStore", "GameDVR_Enabled", 0)?;
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\GameDVR", "AllowGameDVR", 0)?;
-    Ok(String::new())
 }
 
 // ---------------------------------------------------------------- System Restore
@@ -547,44 +480,6 @@ Start-Service bits, wuauserv -ErrorAction SilentlyContinue
     }
     let freed = free_c().saturating_sub(before);
     Ok(format!("{} {:.1} GB", tr("Freed", "Uvolněno"), freed as f64 / 1e9))
-}
-
-fn user_sid() -> Option<String> {
-    let o = sys::exec("whoami.exe", &["/user", "/fo", "csv", "/nh"]).ok()?;
-    o.text.trim().rsplit(',').next().map(|s| s.trim().trim_matches('"').to_string()).filter(|s| s.starts_with("S-1-"))
-}
-
-pub fn sign_in(_c: &Ctx) -> Res {
-    // do not restart apps after sign-in
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon", "RestartApps", 0)?;
-    // no account details (e-mail) on the sign-in screen
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "BlockUserFromShowingAccountDetailsOnSignin", 1)?;
-    // do not use the sign-in info to finish setting up after an update
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "DisableAutomaticRestartSignOn", 1)?;
-    if let Some(sid) = user_sid() {
-        sys::set_dword(Root::Hklm, &format!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\UserARSO\{sid}"), "OptOut", 1)?;
-    }
-    Ok(String::new())
-}
-
-// ---------------------------------------------------------------- sound, mouse
-
-pub fn sound_mouse(_c: &Ctx) -> Res {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_SETMOUSE, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SystemParametersInfoW};
-    // no sound when Windows starts
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation", "DisableStartupSound", 1)?;
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\EditionOverrides", "UserSetting_DisableStartupSound", 1)?;
-    // Communications: do nothing when a call is detected
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Multimedia\Audio", "UserDuckingPreference", 3)?;
-    // Enhance pointer precision: off
-    let mut m = [0i32; 3];
-    let ok = unsafe { SystemParametersInfoW(SPI_SETMOUSE, 0, m.as_mut_ptr() as _, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE) };
-    if ok == 0 {
-        for (n, v) in [("MouseSpeed", "0"), ("MouseThreshold1", "0"), ("MouseThreshold2", "0")] {
-            sys::set_sz(Root::Hkcu, r"Control Panel\Mouse", n, v)?;
-        }
-    }
-    Ok(String::new())
 }
 
 // ---------------------------------------------------------------- display
@@ -663,149 +558,6 @@ pub fn notepad(_c: &Ctx) -> Res {
         std::fs::write(dir.join("settings.dat"), config::bytes("notepad-settings.dat")).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     sys::set_dword(Root::Hklm, r"SOFTWARE\Policies\WindowsNotepad", "DisableAIFeatures", 1)?;
-    Ok(String::new())
-}
-
-// ---------------------------------------------------------------- power
-
-const HIGH_PERFORMANCE: &str = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
-
-pub fn power(_c: &Ctx) -> Res {
-    let pc = "powercfg.exe";
-    if sys::run(pc, &["/setactive", HIGH_PERFORMANCE]).is_err() {
-        // Windows 11 hides the plan on some PCs – it is created from its template
-        sys::run(pc, &["/duplicatescheme", HIGH_PERFORMANCE, HIGH_PERFORMANCE])?;
-        sys::run(pc, &["/setactive", HIGH_PERFORMANCE])?;
-    }
-    for (what, v) in [("monitor-timeout-ac", "10"), ("monitor-timeout-dc", "10"), ("standby-timeout-ac", "0"), ("standby-timeout-dc", "0")] {
-        sys::run(pc, &["/change", what, v])?;
-    }
-    // power button: shut down, sleep button: sleep
-    for set in ["/setacvalueindex", "/setdcvalueindex"] {
-        sys::run(pc, &[set, "SCHEME_CURRENT", "SUB_BUTTONS", "PBUTTONACTION", "3"])?;
-        sys::run(pc, &[set, "SCHEME_CURRENT", "SUB_BUTTONS", "SBUTTONACTION", "1"])?;
-    }
-    sys::run(pc, &["/setactive", "SCHEME_CURRENT"])?;
-    // no Sleep and Lock in the power menu, no hibernation
-    sys::dwords(
-        Root::Hklm,
-        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FlyoutMenuSettings",
-        &[("ShowSleepOption", 0), ("ShowLockOption", 0), ("ShowHibernateOption", 0)],
-    )?;
-    sys::run(pc, &["/hibernate", "off"])?;
-    Ok(tr("High performance", "Vysoký výkon").into())
-}
-
-// ---------------------------------------------------------------- AI and annoyances
-
-const APPS_OUT: &[&str] = &[
-    "Microsoft.Copilot",
-    "Microsoft.Windows.Ai.Copilot.Provider",
-    "MicrosoftWindows.Client.WebExperience",
-    "Microsoft.BingSearch",
-    "Microsoft.BingNews",
-    "Microsoft.BingWeather",
-    "Microsoft.MicrosoftOfficeHub",
-    "Microsoft.GetHelp",
-    "Microsoft.Getstarted",
-    "Microsoft.WindowsFeedbackHub",
-];
-
-pub fn ai_off(c: &Ctx) -> Res {
-    let ai = r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI";
-    // Copilot, Recall, Click to Do, AI in Settings / Paint / Notepad / Edge
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot", 1)?;
-    sys::set_dword(Root::Hkcu, r"Software\Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot", 1)?;
-    sys::dwords(
-        Root::Hklm,
-        ai,
-        &[("DisableAIDataAnalysis", 1), ("AllowRecallEnablement", 0), ("TurnOffSavingSnapshots", 1), ("DisableClickToDo", 1), ("DisableSettingsAgent", 1)],
-    )?;
-    sys::dwords(Root::Hkcu, r"Software\Policies\Microsoft\Windows\WindowsAI", &[("DisableAIDataAnalysis", 1), ("DisableClickToDo", 1)])?;
-    sys::dwords(
-        Root::Hklm,
-        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint",
-        &[("DisableCocreator", 1), ("DisableGenerativeFill", 1), ("DisableImageCreator", 1), ("DisableGenerativeErase", 1), ("DisableRemoveBackground", 1)],
-    )?;
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Policies\WindowsNotepad", "DisableAIFeatures", 1)?;
-    sys::dwords(
-        Root::Hklm,
-        r"SOFTWARE\Policies\Microsoft\Edge",
-        &[
-            ("HubsSidebarEnabled", 0),
-            ("CopilotPageContext", 0),
-            ("CopilotCDPPageContext", 0),
-            ("EdgeShoppingAssistantEnabled", 0),
-            ("ShowRecommendationsEnabled", 0),
-            ("PersonalizationReportingEnabled", 0),
-            ("StartupBoostEnabled", 0),
-            ("BackgroundModeEnabled", 0),
-        ],
-    )?;
-    // widgets, web results and Bing in Search
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Dsh", "AllowNewsAndInterests", 0)?;
-    sys::set_dword(Root::Hkcu, r"Software\Policies\Microsoft\Windows\Explorer", "DisableSearchBoxSuggestions", 1)?;
-    sys::dwords(
-        Root::Hklm,
-        r"SOFTWARE\Policies\Microsoft\Windows\Windows Search",
-        &[("AllowCortana", 0), ("ConnectedSearchUseWeb", 0), ("DisableWebSearch", 1), ("EnableDynamicContentInWSB", 0)],
-    )?;
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\SearchSettings", "IsDynamicSearchBoxEnabled", 0)?;
-    // telemetry, ads, tips, suggestions, "finish setting up"
-    sys::dwords(
-        Root::Hklm,
-        r"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
-        &[("AllowTelemetry", 0), ("DoNotShowFeedbackNotifications", 1), ("AllowDeviceNameInTelemetry", 0)],
-    )?;
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo", "DisabledByGroupPolicy", 1)?;
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo", "Enabled", 0)?;
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Privacy", "TailoredExperiencesWithDiagnosticDataEnabled", 0)?;
-    sys::dwords(
-        Root::Hklm,
-        r"SOFTWARE\Policies\Microsoft\Windows\CloudContent",
-        &[("DisableWindowsConsumerFeatures", 1), ("DisableConsumerAccountStateContent", 1), ("DisableCloudOptimizedContent", 1)],
-    )?;
-    sys::dwords(
-        Root::Hkcu,
-        r"Software\Policies\Microsoft\Windows\CloudContent",
-        &[("DisableTailoredExperiencesWithDiagnosticData", 1), ("DisableThirdPartySuggestions", 1)],
-    )?;
-    sys::dwords(
-        Root::Hkcu,
-        CDM,
-        &[
-            ("ContentDeliveryAllowed", 0),
-            ("FeatureManagementEnabled", 0),
-            ("OemPreInstalledAppsEnabled", 0),
-            ("PreInstalledAppsEnabled", 0),
-            ("PreInstalledAppsEverEnabled", 0),
-            ("SilentInstalledAppsEnabled", 0),
-            ("SoftLandingEnabled", 0),
-            ("SystemPaneSuggestionsEnabled", 0),
-            ("SubscribedContentEnabled", 0),
-            ("SubscribedContent-310093Enabled", 0),
-            ("SubscribedContent-338388Enabled", 0),
-            ("SubscribedContent-338389Enabled", 0),
-            ("SubscribedContent-338393Enabled", 0),
-            ("SubscribedContent-353694Enabled", 0),
-            ("SubscribedContent-353696Enabled", 0),
-            ("SubscribedContent-353698Enabled", 0),
-        ],
-    )?;
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement", "ScoobeSystemSettingEnabled", 0)?;
-    sys::set_dword(Root::Hkcu, r"Software\Microsoft\input\Settings", "InsightsEnabled", 0)?;
-    sys::dwords(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", &[("PublishUserActivities", 0), ("UploadUserActivities", 0), ("EnableActivityFeed", 0)])?;
-    sys::set_dword(Root::Hkcu, ADV, "ShowSyncProviderNotifications", 0)?;
-
-    c.log(tr("Removing Copilot, widgets and similar apps", "Odinstalovávám Copilot, widgety a podobné aplikace"));
-    let names = APPS_OUT.iter().map(|n| format!("'{n}'")).collect::<Vec<_>>().join(",");
-    sys::ps(&format!(
-        // each on its own and errors only logged: a package that is half gone (Tiny11) throws "path not found"
-        "$prov=Get-AppxProvisionedPackage -Online; foreach($n in @({names})) {{ \
-         try {{ Get-AppxPackage -AllUsers -Name $n | Remove-AppxPackage -AllUsers -ErrorAction Stop }} catch {{ \"$n (user): $_\" }}; \
-         try {{ $prov | Where-Object DisplayName -eq $n | Remove-AppxProvisionedPackage -Online -ErrorAction Stop | Out-Null }} catch {{ \"$n (provisioned): $_\" }} }}"
-    ))?;
-    sys::settings_changed();
     Ok(String::new())
 }
 

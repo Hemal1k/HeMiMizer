@@ -6,6 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod appdata;
 mod backup;
 mod catalog;
 mod config;
@@ -22,6 +23,7 @@ mod programs;
 mod steps;
 mod sys;
 mod theme;
+mod tweaks;
 mod widgets;
 mod windows;
 
@@ -94,8 +96,8 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("HeMimizer")
             .with_app_id("HeMimizer")
-            .with_inner_size([720.0, 620.0])
-            .with_min_inner_size([560.0, 440.0])
+            .with_inner_size([840.0, 700.0])
+            .with_min_inner_size([600.0, 480.0])
             .with_icon(icon),
         centered: true,
         ..Default::default()

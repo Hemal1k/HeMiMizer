@@ -1,24 +1,16 @@
 //! The steps of Windows the wizard lets the user switch on or off (the page "Windows"), with their defaults: what most
 //! people want is on, the bigger changes of taste are off. A step listed here runs only when it is on in the plan;
-//! steps not listed (drivers, programs, the settings of the backup) run as they are.
+//! steps not listed (drivers, programs, the settings of the backup) run as they are. The single settings of Windows
+//! (tweaks.rs) are kept in the same list of the plan.
 
 /// (id of the step, on by default)
 pub const OPTIONS: &[(&str, bool)] = &[
     ("restore-point", true),
-    ("ai", true),
     ("microsoft-apps", true),
     ("ad-software", true),
     ("xbox-apps", false),
     ("hibernation", false),
-    ("explorer", true),
-    ("taskbar", false),
-    ("start", false),
-    ("games", false),
-    ("power", false),
     ("startup", false),
-    ("sign-in", false),
-    ("sound-mouse", false),
-    ("network", false),
     ("no-wu-drivers", false),
     ("features", false),
     ("runtimes", true),
@@ -34,8 +26,14 @@ pub fn is_option(id: &str) -> bool {
     OPTIONS.iter().any(|(o, _)| *o == id)
 }
 
+/// The recommended choice: the steps and the single settings that are on by default.
 pub fn defaults() -> Vec<String> {
-    OPTIONS.iter().filter(|(_, on)| *on).map(|(id, _)| id.to_string()).collect()
+    OPTIONS
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(id, _)| id.to_string())
+        .chain(crate::tweaks::ALL.iter().filter(|t| t.recommended).map(|t| t.id.to_string()))
+        .collect()
 }
 
 /// The step runs (by the plan of the wizard; no plan = the defaults).

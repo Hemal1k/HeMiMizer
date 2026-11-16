@@ -23,6 +23,12 @@ pub fn items() -> Vec<Item> {
     let mut v: Vec<Item> = config::parts().into_iter().map(|(id, name, _)| Item { id, name }).collect();
     v.push(Item { id: INSTALLERS, name: tr("All installers, for the setup offline", "Všechny instalačky, pro instalaci offline") });
     v.push(Item { id: FOLDERS, name: "Your folders" });
+    // the settings of the programs of the wizard (shown only for the programs chosen)
+    for d in crate::appdata::ALL {
+        if let Some(i) = crate::catalog::find(d.id) {
+            v.push(Item { id: d.id, name: i.name });
+        }
+    }
     v
 }
 
@@ -92,6 +98,8 @@ pub fn run(chosen: Vec<usize>, tx: Sender<Event>, repaint: impl Fn() + Send + 's
                 download_installers(&log)
             } else if id == FOLDERS {
                 copy_folders(&log)
+            } else if crate::appdata::find(id).is_some() {
+                crate::appdata::capture(id)
             } else {
                 parts.iter().find(|p| p.0 == id).map(|p| (p.2)()).unwrap_or_else(|| Err("?".into()))
             };

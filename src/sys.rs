@@ -115,6 +115,27 @@ pub fn get_sz(root: Root, key: &str, name: &str) -> Option<String> {
     Some(String::from_utf16_lossy(&buf[..len]))
 }
 
+pub fn get_dword(root: Root, key: &str, name: &str) -> Option<u32> {
+    use windows_sys::Win32::System::Registry::RRF_RT_REG_DWORD;
+    let (k, n) = (wide(key), wide(name));
+    let mut v: u32 = 0;
+    let mut size = 4u32;
+    let r = unsafe { RegGetValueW(hkey(root), k.as_ptr(), n.as_ptr(), RRF_RT_REG_DWORD, null_mut(), &mut v as *mut u32 as _, &mut size) };
+    (r == ERROR_SUCCESS).then_some(v)
+}
+
+/// The key is there.
+pub fn key_exists(root: Root, key: &str) -> bool {
+    use windows_sys::Win32::System::Registry::{KEY_READ, RegCloseKey, RegOpenKeyExW};
+    let k = wide(key);
+    let mut h: HKEY = null_mut();
+    let ok = unsafe { RegOpenKeyExW(hkey(root), k.as_ptr(), 0, KEY_READ, &mut h) } == ERROR_SUCCESS;
+    if ok {
+        unsafe { RegCloseKey(h) };
+    }
+    ok
+}
+
 pub fn delete_value(root: Root, key: &str, name: &str) {
     let (k, n) = (wide(key), wide(name));
     unsafe { RegDeleteKeyValueW(hkey(root), k.as_ptr(), n.as_ptr()) };
