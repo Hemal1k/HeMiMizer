@@ -28,12 +28,14 @@ Without a backup, **Set up this PC** runs the same wizard on the new PC.
 |---|---|
 | Drivers and the software of the maker | Ticked by the hardware found: NVIDIA graphics, AMD chipset / Radeon graphics, Intel drivers; for a laptop or a ready-made PC its maker's tool (HP Support Assistant, Lenovo Vantage, MyASUS, Dell, Acer, MSI), for a PC built from parts the tool of its motherboard (Armoury Crate, MSI Center). |
 | Browser | One more besides Microsoft Edge (Chrome, Firefox, Brave, Opera, Vivaldi) – or none. |
-| Programs | About 40 common programs in sections: 7-Zip, VLC, Steam, Discord, Spotify, LibreOffice, VS Code, Git, Python, Java… and HeMi Launcher. |
-| Licence terms | Shown when a program chosen has its own terms: each with a link, accepted at once. |
-| Windows | A restore point, Copilot and ads off, the apps of Microsoft and the trial software of makers removed, updates, runtimes for games – and optional changes of the look and behaviour. |
-| Settings to take along | From the old PC: wallpaper, colours, pinned apps, File Explorer, Microsoft Defender, network drives, display scaling, settings of VLC, qBittorrent, Brave, Notepad and AMD Software. |
+| Programs | About 60 programs in sections, with a search: 7-Zip, VLC, Steam, Epic, Ubisoft Connect, EA app, Discord, Spotify, LibreOffice, VS Code, Git, Python, the free creative apps of ArtCraft… and HeMi Launcher. |
+| Windows | Over 30 changes, each a switch, in groups: clean-up, privacy and AI, the taskbar and Start, File Explorer, system and games, updates. A starting point: recommended, like this PC (read from the old PC), or change nothing. |
+| Settings to take along | From the old PC – Windows: wallpaper, colours, pinned apps, File Explorer, Microsoft Defender, network drives, display scaling, Notepad; your programs (only the ones chosen): VLC, qBittorrent, Brave, Steam, AMD Software, 7-Zip, Notepad++, PowerToys, OBS, ShareX, VS Code, Git, GIMP, LibreOffice, Thunderbird… |
 | Your folders | Own folders copied into the backup and put back to their place. |
-| Where to save | The folder of the backup, the installers now (for a setup offline), the name of the PC. |
+| Where to save | The folder of the backup, the installers now (for a setup offline), the name of the PC – and a summary. |
+
+Programs with their own licence terms are listed at the setup, each with a link: HeMimizer installs them only after you
+accept, or leaves them out.
 
 The programs come through **winget** (the package manager of Windows), the HeMi apps from their GitHub releases, the AMD drivers
 from amd.com. Nothing else is sent anywhere.
