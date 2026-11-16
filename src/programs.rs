@@ -599,11 +599,20 @@ pub fn trust_servers(drives: &[config::Drive]) -> Result<(), String> {
 
 pub const HEMIDOCK_SETUP: &str = "https://github.com/Hemal1k/HeMiDock/releases/latest/download/HeMiDock-Setup.exe";
 
+/// Where HeMiDock is: the folder of its installation (Apps & features), else where its installer puts it for the user
+/// (%LOCALAPPDATA%\Programs\HeMi\HeMiDock; before 1.8.5 it was Programs\HeMiDock).
 pub fn hemidock_install_dir() -> PathBuf {
-    PathBuf::from(sys::env("LOCALAPPDATA", "")).join(r"Programs\HeMiDock")
+    let key = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\HeMiDock_is1";
+    if let Some(dir) = sys::get_sz(sys::Root::Hkcu, key, "InstallLocation").or_else(|| sys::get_sz(sys::Root::Hklm, key, "InstallLocation")) {
+        let dir = PathBuf::from(dir.trim_end_matches('\\'));
+        if dir.join("HeMiDock.exe").exists() {
+            return dir;
+        }
+    }
+    PathBuf::from(sys::env("LOCALAPPDATA", "")).join(r"Programs\HeMi\HeMiDock")
 }
 
-/// The newest HeMiDock from its GitHub releases, through its installer (into %LOCALAPPDATA%\Programs\HeMiDock; the
+/// The newest HeMiDock from its GitHub releases, through its installer (into %LOCALAPPDATA%\Programs\HeMi\HeMiDock; the
 /// installer adds the .NET Runtime and the Windows App Runtime when they are missing); then the captured settings,
 /// and the dock started as the user (not as administrator).
 pub fn hemidock(c: &Ctx) -> Res {
