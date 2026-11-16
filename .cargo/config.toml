@@ -1,0 +1,9 @@
+[build]
+target-dir = "build"
+
+# the C runtime inside the exe: it runs on a fresh Windows without the Visual C++ Redistributable
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
