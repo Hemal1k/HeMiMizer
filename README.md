@@ -1,4 +1,4 @@
-# HeMimizer
+# <img src="assets/HeMimizer.png" width="40" height="40" alt=""> HeMimizer
 
 [![Latest release](https://img.shields.io/github/v/release/Hemal1k/HeMimizer?label=release)](https://github.com/Hemal1k/HeMimizer/releases/latest) [![Downloads](https://img.shields.io/github/downloads/Hemal1k/HeMimizer/total)](https://github.com/Hemal1k/HeMimizer/releases) [![License: MIT](https://img.shields.io/github/license/Hemal1k/HeMimizer)](LICENSE) ![Windows 11](https://img.shields.io/badge/Windows-11-0078D4)
 
