@@ -382,9 +382,12 @@ pub const STARTS_ITSELF: &[(&str, &str)] = &[
     ("qbittorrent", "qBittorrent"),
 ];
 
+/// The option "Other programs do not start with Windows": everything in Run is switched off – except the programs of
+/// the wizard, whose start is chosen in the table of the last page (the step "shortcuts"), and what must run.
 pub fn startup_apps(_c: &Ctx) -> Res {
     let plan = crate::plan::Plan::load().unwrap_or_default();
-    let ahead: Vec<&str> = STARTS_ITSELF.iter().filter(|(id, _)| plan.has(id)).map(|(_, run)| *run).chain(["OneDrive"]).collect();
+    let chosen: Vec<&str> = STARTS_ITSELF.iter().filter(|(id, _)| plan.has(id)).map(|(_, run)| *run).collect();
+    let ahead: Vec<&str> = vec!["OneDrive"];
     // 03 = disabled, then the time of the change (zero is fine)
     let off = [3u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     let approved = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved";
@@ -399,7 +402,7 @@ pub fn startup_apps(_c: &Ctx) -> Res {
             names.extend(ahead.iter().map(|s| s.to_string()));
         }
         for n in names {
-            if STARTUP_KEEP.iter().any(|k| n.eq_ignore_ascii_case(k)) {
+            if STARTUP_KEEP.iter().chain(&chosen).any(|k| n.eq_ignore_ascii_case(k)) {
                 continue;
             }
             // HKLM Run entries are approved under HKLM, HKCU ones under HKCU
@@ -625,4 +628,64 @@ pub fn rename_pc(c: &Ctx) -> Res {
     }
     c.reboot();
     Ok(format!("{name} {}", tr("after a restart", "po restartu")))
+}
+
+// ---------------------------------------------------------------- Wi-Fi and fonts from the backup
+
+/// The Wi-Fi networks of the backup, with their passwords, for all users of the PC.
+pub fn wifi(c: &Ctx) -> Res {
+    let dir = config::dir().join("wifi");
+    let files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .map(|r| r.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml"))).collect())
+        .unwrap_or_default();
+    if files.is_empty() {
+        return Ok(config::not_backed_up());
+    }
+    c.log("Wi-Fi networks");
+    let mut n = 0;
+    let mut last = String::new();
+    for f in &files {
+        match sys::exec("netsh.exe", &["wlan", "add", "profile", &format!("filename={}", f.display()), "user=all"]) {
+            Ok(o) if o.code == 0 => n += 1,
+            Ok(o) => last = o.text.trim().lines().last().unwrap_or("").to_string(),
+            Err(e) => last = e,
+        }
+    }
+    if n == 0 {
+        // a PC without Wi-Fi (or without its driver yet) has no Wi-Fi service: nothing to do
+        return Ok(format!("Not added – {last}"));
+    }
+    Ok(format!("{n} of {}", files.len()))
+}
+
+/// The fonts of the backup into Windows\Fonts, registered for all users.
+pub fn fonts(c: &Ctx) -> Res {
+    use windows_sys::Win32::Graphics::Gdi::AddFontResourceW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_FONTCHANGE};
+    let dir = config::dir().join("fonts");
+    let Ok(list) = std::fs::read_to_string(dir.join("fonts.txt")) else { return Ok(config::not_backed_up()) };
+    c.log("Fonts");
+    let win_fonts = std::path::PathBuf::from(sys::env("SystemRoot", r"C:\Windows")).join("Fonts");
+    let key = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
+    let (mut n, mut failed) = (0, Vec::new());
+    for line in list.lines().filter(|l| !l.trim().is_empty()) {
+        let Some((name, file)) = line.split_once('|') else { continue };
+        let to = win_fonts.join(file);
+        if !to.exists() {
+            if let Err(e) = std::fs::copy(dir.join(file), &to) {
+                failed.push(format!("{file}: {e}"));
+                continue;
+            }
+        }
+        if let Err(e) = sys::set_sz(Root::Hklm, key, name, file) {
+            failed.push(e);
+            continue;
+        }
+        let w = sys::wide(&to.display().to_string());
+        unsafe { AddFontResourceW(w.as_ptr()) };
+        n += 1;
+    }
+    unsafe { SendMessageTimeoutW(HWND_BROADCAST, WM_FONTCHANGE, 0, 0, SMTO_ABORTIFHUNG, 2000, std::ptr::null_mut()) };
+    let text = format!("{n} fonts");
+    if failed.is_empty() { Ok(text) } else { Err(format!("{text}\n{}", failed.join("\n"))) }
 }

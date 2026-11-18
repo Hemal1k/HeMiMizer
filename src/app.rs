@@ -38,6 +38,8 @@ enum Page {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Phase {
+    /// A backup protected with a password: the password first.
+    Unlock,
     /// The first page: back up this PC (before a reinstall) or set it up (after one).
     Choose,
     /// The wizard: what the new PC gets (before the backup, or on the new PC without a backup).
@@ -91,6 +93,8 @@ enum Action {
     RunBackup,
     OpenFolder,
     Pack,
+    Unlock,
+    Retry,
     Start,
     Quit,
     AskReboot,
@@ -121,6 +125,10 @@ pub struct HeMimizerApp {
     current: Option<usize>,
     log_line: String,
     failures: Vec<(String, String)>,
+    /// the steps that failed (indices), for "Try again"
+    failed_steps: Vec<usize>,
+    /// the overview of the start page: the steps that will do something, for this plan
+    overview: Option<(crate::plan::Plan, Vec<usize>)>,
     notes: Vec<String>,
     reboot: bool,
     restart_at: Option<Instant>,
@@ -154,6 +162,15 @@ pub struct HeMimizerApp {
     found_apps: Vec<&'static str>,
     /// packing the backup into a .zip: None = not asked, Some(None) = packing, Some(Some(result)) = done
     pack: std::sync::Arc<std::sync::Mutex<Option<Option<Result<String, String>>>>>,
+    /// the password of the backup, typed twice on its last page (empty = not protected), and how the encryption went
+    seal_pw: String,
+    seal_pw2: String,
+    sealed: Option<Result<String, String>>,
+    /// a protected backup at the start: the password typed, and the unlocking (None = not yet, Some(None) = running)
+    unlock_pw: String,
+    unlock: std::sync::Arc<std::sync::Mutex<Option<Option<Result<(), String>>>>>,
+    /// this PC has Wi-Fi networks saved (the backup offers them)
+    has_wifi: bool,
     backup_on: Vec<bool>,
     backup_done: Vec<Option<Result<String, String>>>,
     backup_now: Option<usize>,
@@ -216,11 +233,13 @@ impl HeMimizerApp {
         let mut app = HeMimizerApp {
             steps,
             chosen,
-            phase: Phase::Choose,
+            phase: if crate::crypto::locked() { Phase::Unlock } else { Phase::Choose },
             done: 0,
             current: None,
             log_line: String::new(),
             failures: Vec::new(),
+            failed_steps: Vec::new(),
+            overview: None,
             notes: Vec::new(),
             reboot: false,
             restart_at: None,
@@ -250,6 +269,12 @@ impl HeMimizerApp {
             backup_items: crate::backup::items(),
             found_apps: crate::appdata::ALL.iter().filter(|d| d.found_only() && crate::appdata::present(d.id)).map(|d| d.id).collect(),
             pack: Default::default(),
+            seal_pw: String::new(),
+            seal_pw2: String::new(),
+            sealed: None,
+            unlock_pw: String::new(),
+            unlock: Default::default(),
+            has_wifi: config::has_wifi(),
             backup_now: None,
             backup_log: String::new(),
             btx,
@@ -294,6 +319,7 @@ impl HeMimizerApp {
         self.phase = Phase::Running;
         self.done = 0;
         self.failures.clear();
+        self.failed_steps.clear();
         self.notes.clear();
         let ctx = ctx.clone();
         steps::run(self.chosen.clone(), passwords, self.tx.clone(), move || ctx.request_repaint());
@@ -308,6 +334,7 @@ impl HeMimizerApp {
                 }
                 crate::backup::Event::Log(t) => self.backup_log = t,
                 crate::backup::Event::Done(i, r) => self.backup_done[i] = Some(r),
+                crate::backup::Event::Sealed(r) => self.sealed = Some(r),
                 crate::backup::Event::Finished => {
                     self.backup_now = None;
                     self.phase = Phase::BackedUp;
@@ -338,6 +365,7 @@ impl HeMimizerApp {
                     self.done += 1;
                     if let Err(e) = r {
                         self.failures.push((self.steps[i].title().to_string(), e));
+                        self.failed_steps.push(i);
                     }
                 }
                 // put off until the internet: counted when it runs again
@@ -398,6 +426,7 @@ impl HeMimizerApp {
                     Phase::Wizard(page) => self.page_title(page),
                     Phase::BackingUp | Phase::BackedUp => tr("Back up this PC", "Zálohovat toto PC"),
                     Phase::Start => tr("Set up this PC", "Nastavit toto PC"),
+                    Phase::Unlock => "Protected backup",
                     _ => "HeMimizer",
                 }
             };
@@ -670,10 +699,60 @@ impl HeMimizerApp {
         }
     }
 
+    /// The Wi-Fi networks go into the backup (their passwords: only into a protected one).
+    fn wifi_on(&self) -> bool {
+        self.backup_items.iter().position(|it| it.id == "wifi").is_some_and(|i| self.backup_on[i] && self.backup_visible("wifi"))
+    }
+
+    /// The password of the backup: typed the same twice (or none); the Wi-Fi passwords need one.
+    fn seal_ok(&self) -> bool {
+        self.seal_pw == self.seal_pw2 && (!self.wifi_on() || !self.seal_pw.is_empty())
+    }
+
+    /// A protected backup: the password, then its settings are opened (HeMimizer starts again with them).
+    fn unlock_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        let p = self.p;
+        let state = self.unlock.lock().unwrap().clone();
+        info_bar(ui, &p, Tone::Caution, "This backup is protected with a password. Type it to set up this PC with it.", None);
+        ui.add_space(10.0);
+        card(ui, &p, |ui| {
+            ui.add_space(4.0);
+            ui.label(RichText::new("Password of the backup").size(14.0).color(p.text));
+            ui.add_space(6.0);
+            let r = ui.add_enabled(
+                state != Some(None),
+                egui::TextEdit::singleline(&mut self.unlock_pw).password(true).desired_width(f32::INFINITY).margin(vec2(8.0, 6.0)),
+            );
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.unlock_pw.is_empty() {
+                acts.push(Action::Unlock);
+            }
+            ui.add_space(4.0);
+        });
+        match &state {
+            Some(None) => {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.add(egui::Spinner::new().size(16.0).color(p.accent_text));
+                    ui.label(RichText::new("Opening the backup…").size(13.0).color(p.text2));
+                });
+            }
+            Some(Some(Err(e))) => {
+                ui.add_space(6.0);
+                ui.label(RichText::new(e.as_str()).size(13.0).color(p.critical));
+            }
+            _ => {}
+        }
+        ui.add_space(10.0);
+        ui.add(
+            egui::Label::new(RichText::new("Forgot it? The backup cannot be opened without it – go on without the backup and choose everything again in the wizard.").size(12.0).color(p.text3))
+                .wrap(),
+        );
+    }
+
     /// Can Next / Back up go on from this page?
     fn page_ok(&self, page: Page) -> bool {
         match page {
-            Page::Save => crate::plan::valid_pc_name(&self.plan.pc_name) && (!self.wizard_backup || !self.save_to.trim().is_empty()),
+            Page::Save => crate::plan::valid_pc_name(&self.plan.pc_name) && (!self.wizard_backup || (!self.save_to.trim().is_empty() && self.seal_ok())),
             _ => true,
         }
     }
@@ -739,12 +818,7 @@ impl HeMimizerApp {
     fn option_detail(&self, id: &str, base: &'static str) -> String {
         match id {
             "startup" => {
-                let names = self.chosen_names(crate::windows::STARTS_ITSELF.iter().map(|(id, _)| *id));
-                if names.is_empty() {
-                    "Programs do not start with Windows by themselves – they can be switched back on in Task Manager".into()
-                } else {
-                    format!("{} and other programs do not start with Windows by themselves – switch them back on in Task Manager", names.join(", "))
-                }
+                "OneDrive and the other programs already in the startup list – the new programs start as ticked on the last page; all can be switched back on in Task Manager".into()
             }
             "runtimes" => {
                 let games = self.games_chosen();
@@ -1048,7 +1122,8 @@ impl HeMimizerApp {
             Tweak(usize),
         }
         let steps = |ids: &[&'static str]| ids.iter().map(|id| Row::Step(id)).collect::<Vec<_>>();
-        let tweaks_of = |g: crate::tweaks::Group| crate::tweaks::ALL.iter().enumerate().filter(move |(_, t)| t.group == g).map(|(i, _)| Row::Tweak(i));
+        let plan = &self.plan;
+        let tweaks_of = |g: crate::tweaks::Group| crate::tweaks::ALL.iter().enumerate().filter(move |(_, t)| t.group == g && crate::tweaks::offered(t.id, plan)).map(|(i, _)| Row::Tweak(i));
         let mut groups: Vec<(&str, char, Vec<Row>)> = vec![("Clean up", glyph::BROOM, steps(&["restore-point", "microsoft-apps", "ad-software", "xbox-apps", "hibernation", "cleanup"]))];
         for (g, title, icon) in crate::tweaks::GROUPS {
             let mut rows: Vec<Row> = tweaks_of(*g).collect();
@@ -1097,6 +1172,9 @@ impl HeMimizerApp {
         if id == crate::backup::INSTALLERS || id == crate::backup::FOLDERS || id == "hemidock" {
             return false;
         }
+        if id == "wifi" {
+            return self.has_wifi;
+        }
         if let Some((_, app)) = Self::PROGRAM_PARTS.iter().find(|(part, _)| *part == id) {
             return self.plan.has(app);
         }
@@ -1119,6 +1197,8 @@ impl HeMimizerApp {
             "appearance" => "Dark mode and the accent colour",
             "explorer" => "File extensions, hidden files and the view",
             "mouse" => "Pointer speed, scrolling and double-click speed",
+            "wifi" => "The saved networks with their passwords – only into a backup with a password",
+            "fonts" => "Fonts you installed – for Adobe, DaVinci Resolve, Office…",
             "scaling" => "The size of text and apps, per monitor",
             "steam" => "Where your games are (Defender leaves them out)",
             "vlc" => "Settings and skin",
@@ -1140,6 +1220,8 @@ impl HeMimizerApp {
             "mouse" => glyph::MOUSE,
             "scaling" => glyph::MONITOR,
             "drives" => glyph::DRIVE,
+            "wifi" => glyph::GLOBE,
+            "fonts" => glyph::COLOR,
             _ => crate::catalog::find(id).map(|i| crate::catalog::kind_glyph(i.kind)).unwrap_or(glyph::SETTINGS),
         }
     }
@@ -1200,6 +1282,13 @@ impl HeMimizerApp {
             ui.add_space(6.0);
             let where_ = format!("{} {}", tr("Into", "Do"), config::dir().parent().map(|d| d.display().to_string()).unwrap_or_default());
             ui.label(RichText::new(where_).size(12.0).color(p.text3));
+            if let Some(r) = &self.sealed {
+                ui.add_space(10.0);
+                match r {
+                    Ok(t) => info_bar(ui, &p, Tone::Success, &format!("Protected with the password: {t}"), None),
+                    Err(e) => info_bar(ui, &p, Tone::Critical, &format!("Not encrypted – the backup is NOT protected: {e}"), None),
+                };
+            }
             // at the end: one .zip is easier to move than the folder – asked, not done by itself
             if self.phase == Phase::BackedUp {
                 ui.add_space(14.0);
@@ -1355,6 +1444,29 @@ impl HeMimizerApp {
                 acts.push(Action::Offline(!self.plan.offline));
             }
             ui.add_space(14.0);
+            section(ui, &p, "Password");
+            card(ui, &p, |ui| {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new("Encrypts your settings, Wi-Fi passwords, the settings of programs and your folders (AES-256). HeMimizer asks for it on the new PC. Empty: not protected.")
+                            .size(12.0)
+                            .color(p.text2),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(6.0);
+                ui.add(egui::TextEdit::singleline(&mut self.seal_pw).password(true).hint_text("Password").desired_width(f32::INFINITY).margin(vec2(8.0, 6.0)));
+                ui.add_space(4.0);
+                ui.add(egui::TextEdit::singleline(&mut self.seal_pw2).password(true).hint_text("The same once more").desired_width(f32::INFINITY).margin(vec2(8.0, 6.0)));
+            });
+            if self.seal_pw != self.seal_pw2 && !self.seal_pw2.is_empty() {
+                ui.label(RichText::new("The two passwords are not the same.").size(12.0).color(p.critical));
+            } else if self.wifi_on() && self.seal_pw.is_empty() {
+                ui.label(RichText::new("The Wi-Fi passwords go only into a protected backup – set a password, or leave out Wi-Fi networks on the page Take along.").size(12.0).color(p.caution));
+            } else if !self.seal_pw.is_empty() {
+                ui.label(RichText::new("Keep the password safe – without it the backup cannot be opened.").size(12.0).color(p.text3));
+            }
+            ui.add_space(14.0);
         }
         section(ui, &p, "Name of the PC");
         card(ui, &p, |ui| {
@@ -1462,6 +1574,29 @@ impl HeMimizerApp {
         };
         info_bar(ui, &p, tone, &text, None);
         ui.add_space(10.0);
+        // the overview: what the run will do, step by step (nothing else is done)
+        if self.overview.as_ref().is_none_or(|(plan, _)| *plan != self.plan) {
+            let todo = self.chosen.iter().copied().filter(|&i| steps::applies(self.steps[i].id)).collect();
+            self.overview = Some((self.plan.clone(), todo));
+        }
+        let todo = self.overview.as_ref().map(|(_, t)| t.clone()).unwrap_or_default();
+        if self.fold_head(ui, Some(glyph::INFO), "What HeMimizer will do", todo.len(), todo.len(), false, acts) {
+            card(ui, &p, |ui| {
+                for (n, &i) in todo.iter().enumerate() {
+                    let s = &self.steps[i];
+                    ui.horizontal_top(|ui| {
+                        ui.add_sized(vec2(22.0, 16.0), egui::Label::new(RichText::new(format!("{}.", n + 1)).size(12.5).color(p.text3)));
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            ui.label(RichText::new(s.title()).size(13.0).color(p.text));
+                            ui.add(egui::Label::new(RichText::new(tr(s.detail.0, s.detail.1)).size(11.5).color(p.text2)).wrap());
+                        });
+                    });
+                    ui.add_space(3.0);
+                }
+            });
+            ui.add_space(10.0);
+        }
         let licensed = self.plan.licensed();
         if !licensed.is_empty() {
             section(ui, &p, "Licence terms");
@@ -1744,6 +1879,18 @@ impl HeMimizerApp {
                 acts.push(Action::OpenLog);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| match self.phase {
+                Phase::Unlock => {
+                    let busy = self.unlock.lock().unwrap().as_ref().is_some_and(|s| s.is_none());
+                    if Btn::new("Open").accent().enabled(!busy && !self.unlock_pw.is_empty()).show(ui, &p).clicked() {
+                        acts.push(Action::Unlock);
+                    }
+                    if Btn::new(tr("Close", "Zavřít")).show(ui, &p).clicked() {
+                        acts.push(Action::Quit);
+                    }
+                    if Btn::new("Without the backup").enabled(!busy).tip("Choose everything again in the wizard").show(ui, &p).clicked() {
+                        acts.push(Action::Go(Phase::Choose));
+                    }
+                }
                 Phase::Choose => {
                     if Btn::new(tr("Close", "Zavřít")).show(ui, &p).clicked() {
                         acts.push(Action::Quit);
@@ -1776,10 +1923,13 @@ impl HeMimizerApp {
                         acts.push(Action::Quit);
                     }
                 }
-                // the end: Done closes HeMimizer and removes it with its data (the log and the to-do file stay)
+                // the end: Done closes HeMimizer and removes it (nothing of it stays); Try again runs the failed steps once more
                 Phase::Finished if self.restart_at.is_none() && !self.resume_pending => {
                     if Btn::new("Done").icon(glyph::COMPLETED).accent().tip("Closes HeMimizer and removes it – nothing of it stays on the PC").show(ui, &p).clicked() {
                         acts.push(Action::Done);
+                    }
+                    if !self.failed_steps.is_empty() && Btn::new("Try again").icon(glyph::RESTART).tip("Runs only the steps that failed once more").show(ui, &p).clicked() {
+                        acts.push(Action::Retry);
                     }
                     if self.reboot && Btn::new("Restart PC").icon(glyph::RESTART).show(ui, &p).clicked() {
                         acts.push(Action::AskReboot);
@@ -1992,12 +2142,35 @@ impl HeMimizerApp {
                     self.backup_done.iter_mut().for_each(|d| *d = None);
                     self.phase = Phase::BackingUp;
                     let ctx = ctx.clone();
-                    crate::backup::run(chosen, self.btx.clone(), move || ctx.request_repaint());
+                    crate::backup::run(chosen, Some(self.seal_pw.clone()).filter(|p| !p.is_empty()), self.btx.clone(), move || ctx.request_repaint());
                 }
                 Action::OpenFolder => {
                     if let Some(d) = config::dir().parent() {
                         sys::shell_open(&d.display().to_string());
                     }
+                }
+                Action::Retry => {
+                    // only the failed steps, in their order; what is done (installed.txt) is not done twice
+                    self.chosen = std::mem::take(&mut self.failed_steps);
+                    self.fresh = false;
+                    self.start(ctx);
+                }
+                Action::Unlock => {
+                    *self.unlock.lock().unwrap() = Some(None);
+                    let (state, pw, ctx) = (self.unlock.clone(), self.unlock_pw.clone(), ctx.clone());
+                    std::thread::spawn(move || {
+                        let r = crate::crypto::unseal(&pw);
+                        let ok = r.is_ok();
+                        *state.lock().unwrap() = Some(Some(r));
+                        // opened: HeMimizer starts again, now with the settings of the backup
+                        if ok {
+                            if let Ok(exe) = std::env::current_exe() {
+                                let _ = std::process::Command::new(exe).spawn();
+                            }
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        ctx.request_repaint();
+                    });
                 }
                 Action::Pack => {
                     *self.pack.lock().unwrap() = Some(None);
@@ -2151,7 +2324,7 @@ impl eframe::App for HeMimizerApp {
             // every page starts at its top
             let page_key = match self.phase {
                 Phase::Wizard(page) => 10 + page as usize,
-                Phase::Choose => 0,
+                Phase::Choose | Phase::Unlock => 0,
                 Phase::BackingUp | Phase::BackedUp => 1,
                 Phase::Start => 2,
                 Phase::Running => 3,
@@ -2161,6 +2334,7 @@ impl eframe::App for HeMimizerApp {
                 ui.spacing_mut().item_spacing.y = 4.0;
                 match self.phase {
                     Phase::Choose => self.choose_page(ui, &mut acts),
+                    Phase::Unlock => self.unlock_page(ui, &mut acts),
                     Phase::Wizard(page) => self.wizard_page(ui, page, &mut acts),
                     Phase::BackingUp | Phase::BackedUp => self.backup_page(ui, &mut acts),
                     Phase::Start => self.start_page(ui, &mut acts),

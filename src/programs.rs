@@ -131,11 +131,24 @@ pub fn vlc(c: &Ctx) -> Res {
     if !crate::install::chosen("vlc") {
         return Ok(crate::install::not_chosen());
     }
-    if crate::install::ensure(c, "vlc")? {
-        let dir = vlc_dir();
+    crate::install::ensure(c, "vlc")?;
+    // only when chosen on the page Windows ("VLC without extras"); the step "tweaks" does the same when VLC was there
+    if crate::install::plan().windows_on("vlc-lean") {
+        vlc_lean(c)?;
+    }
+    vlc_settings(c)?;
+    Ok(format!("VLC {}", installed_version("VLC media player").unwrap_or_default()))
+}
+
+/// VLC without its extras: no web plug-ins, no disc playback (AutoPlay), no items in the right-click menu; the file
+/// types of audio and video stay. Nothing when VLC is not installed.
+pub fn vlc_lean(c: &Ctx) -> Result<(), String> {
+    let dir = vlc_dir();
+    if !Path::new(&format!(r"{dir}\vlc.exe")).exists() {
+        return Ok(());
+    }
+    {
         c.log(tr("Removing the parts of VLC that are not wanted", "Odebírám nechtěné součásti VLC"));
-        // no web plug-ins, no disc playback (AutoPlay), no context menus; the file types of audio and video stay (the
-        // shortcuts and the start with Windows follow the choice of the wizard: the step "shortcuts")
         let ax = format!(r"{dir}\axvlc.dll");
         if Path::new(&ax).exists() {
             let _ = sys::run("regsvr32.exe", &["/u", "/s", &ax]);
@@ -157,8 +170,7 @@ Get-ChildItem "$a\EventHandlers" -ErrorAction SilentlyContinue | ForEach-Object 
         )?;
         sys::assoc_changed();
     }
-    vlc_settings(c)?;
-    Ok(format!("VLC {}", installed_version("VLC media player").unwrap_or_default()))
+    Ok(())
 }
 
 /// The skin and the settings of VLC (the skin interface, no tray icon, no update / privacy questions).
@@ -265,13 +277,7 @@ pub fn qbittorrent(c: &Ctx) -> Res {
     }
     crate::install::ensure(c, "qbittorrent")?;
     let version = installed_version("qBittorrent").unwrap_or_default();
-    let exe = format!(r"{}\qBittorrent\qbittorrent.exe", program_files());
-    // a firewall rule, long paths (the shortcuts and the start with Windows follow the choice of the wizard)
-    sys::set_dword(Root::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "LongPathsEnabled", 1)?;
-    let has_rule = sys::exec("netsh.exe", &["advfirewall", "firewall", "show", "rule", "name=qBittorrent"]).map(|o| o.code == 0).unwrap_or(false);
-    if !has_rule {
-        sys::run("netsh.exe", &["advfirewall", "firewall", "add", "rule", "name=qBittorrent", "dir=in", "action=allow", &format!("program={exe}"), "enable=yes"])?;
-    }
+    // nothing unasked: long paths are a choice on the page Windows, the firewall asks the user at the first start
     c.log(tr("Setting up qBittorrent", "Nastavuji qBittorrent"));
     if sys::is_running("qbittorrent.exe") {
         return Err(tr("Close qBittorrent first – it would overwrite the settings.", "Nejdřív zavři qBittorrent – přepsal by nastavení.").into());

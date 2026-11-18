@@ -210,8 +210,97 @@ pub fn parts() -> Vec<Part> {
         ("amd", tr("AMD graphics settings", "Nastavení grafiky AMD"), cap_amd),
         ("scaling", tr("Display scaling", "Měřítko displeje"), cap_scaling),
         ("drives", "Mapped network drives", cap_drives),
+        ("wifi", "Wi-Fi networks", cap_wifi),
+        ("fonts", "Fonts", cap_fonts),
         ("oc", tr("OC profile", "OC profil"), cap_oc),
     ]
+}
+
+// ---------------------------------------------------------------- Wi-Fi
+
+/// This PC has Wi-Fi networks saved (a line "<kind> : <name>" per network; no Wi-Fi service = none).
+pub fn has_wifi() -> bool {
+    sys::exec("netsh.exe", &["wlan", "show", "profiles"]).is_ok_and(|o| o.code == 0 && o.text.lines().any(|l| l.contains(" : ") && !l.trim_end().ends_with(':')))
+}
+
+/// The saved Wi-Fi networks with their passwords (netsh writes one XML per network) – only into a backup protected
+/// with a password (the window asks for one).
+fn cap_wifi() -> Result<String, String> {
+    let to = dir().join("wifi");
+    let _ = std::fs::remove_dir_all(&to);
+    std::fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+    let o = sys::exec("netsh.exe", &["wlan", "export", "profile", "key=clear", &format!("folder={}", to.display())])?;
+    let n = std::fs::read_dir(&to).map(|r| r.flatten().filter(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("xml"))).count()).unwrap_or(0);
+    if n == 0 {
+        let _ = std::fs::remove_dir_all(&to);
+        return Err(o.text.trim().lines().last().unwrap_or("No Wi-Fi networks on this PC").to_string());
+    }
+    Ok(format!("{n} {}", if n == 1 { "network" } else { "networks" }))
+}
+
+// ---------------------------------------------------------------- fonts
+
+const FONTS_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
+/// The account that owns the fonts of Windows itself (a font installed later belongs to someone else).
+const TRUSTED_INSTALLER: &str = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+
+fn owner_sid(path: &Path) -> Option<String> {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT};
+    use windows_sys::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
+    let w = sys::wide(&path.display().to_string());
+    unsafe {
+        let mut owner: PSID = std::ptr::null_mut();
+        let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+        if GetNamedSecurityInfoW(w.as_ptr(), SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, &mut owner, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), &mut sd) != 0 {
+            return None;
+        }
+        let mut s: *mut u16 = std::ptr::null_mut();
+        let r = if ConvertSidToStringSidW(owner, &mut s) != 0 {
+            let len = (0..).take_while(|&i| *s.add(i) != 0).count();
+            let t = String::from_utf16_lossy(std::slice::from_raw_parts(s, len));
+            LocalFree(s.cast());
+            Some(t)
+        } else {
+            None
+        };
+        LocalFree(sd);
+        r
+    }
+}
+
+/// The fonts installed after Windows: the ones of this user, and the ones in Windows\Fonts that Windows did not bring
+/// (their owner is not TrustedInstaller). Copied into config\fonts with fonts.txt: name|file.
+fn cap_fonts() -> Result<String, String> {
+    let win_fonts = PathBuf::from(sys::env("SystemRoot", r"C:\Windows")).join("Fonts");
+    let mut found: Vec<(String, PathBuf)> = Vec::new();
+    for (root, machine) in [(Root::Hkcu, false), (Root::Hklm, true)] {
+        for name in sys::value_names(root, FONTS_KEY) {
+            let Some(v) = sys::get_sz(root, FONTS_KEY, &name) else { continue };
+            let path = if Path::new(&v).is_absolute() { PathBuf::from(&v) } else { win_fonts.join(&v) };
+            if !path.is_file() || (machine && owner_sid(&path).is_none_or(|s| s == TRUSTED_INSTALLER)) {
+                continue;
+            }
+            found.push((name, path));
+        }
+    }
+    let to = dir().join("fonts");
+    let _ = std::fs::remove_dir_all(&to);
+    if found.is_empty() {
+        return Err("No fonts installed besides the ones of Windows".into());
+    }
+    std::fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+    let mut lines = Vec::new();
+    let mut size = 0;
+    for (name, path) in &found {
+        let file = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        if std::fs::copy(path, to.join(&file)).is_ok() {
+            size += std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            lines.push(format!("{name}|{file}"));
+        }
+    }
+    std::fs::write(to.join("fonts.txt"), lines.join("\r\n")).map_err(|e| e.to_string())?;
+    Ok(format!("{} fonts ({:.1} MB)", lines.len(), size as f64 / 1e6))
 }
 
 /// Takes the current settings of this PC into the config folder; one line per part (✓ or ✗).

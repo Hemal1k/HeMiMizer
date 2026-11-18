@@ -10,6 +10,7 @@ mod appdata;
 mod backup;
 mod catalog;
 mod config;
+mod crypto;
 mod debloat;
 mod look;
 mod options;

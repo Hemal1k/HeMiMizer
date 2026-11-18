@@ -275,6 +275,8 @@ pub fn all() -> Vec<Step> {
             windows::windows_update
         ),
         step!("mouse-settings", Windows, "Mouse", "Myš", "Pointer speed, scrolling and double-click speed from the backup", "Rychlost ukazatele, posouvání a dvojklik ze zálohy", windows::mouse),
+        step!("wifi", Windows, "Wi-Fi networks", "Sítě Wi-Fi", "The saved networks from the backup, with their passwords", "Uložené sítě ze zálohy i s hesly", windows::wifi),
+        step!("fonts", Windows, "Fonts", "Písma", "The fonts installed on the old PC, from the backup", "Písma nainstalovaná na starém PC, ze zálohy", windows::fonts),
         step!("calculator", Windows, "Calculator", "Kalkulačka", "Uninstalled", "Odinstalovat", windows::calculator),
         step!(
             "restore",
@@ -306,10 +308,10 @@ pub fn all() -> Vec<Step> {
         step!(
             "startup",
             Windows,
-            "Startup apps",
+            "Other programs do not start with Windows",
             "Aplikace při spuštění",
-            "Only HeMiDock starts with Windows; Steam and the others off (can be turned on in Task Manager)",
-            "S Windows startuje jen HeMiDock; Steam a ostatní vypnuté (jdou zapnout ve Správci úloh)",
+            "OneDrive and what else is in the startup list – the new programs follow the table of the last page (can be turned on in Task Manager)",
+            "OneDrive a další v seznamu spouštění – nové programy podle tabulky na poslední stránce (jdou zapnout ve Správci úloh)",
             windows::startup_apps
         ),
         step!(
@@ -348,8 +350,8 @@ pub fn all() -> Vec<Step> {
     // Microsoft Store, Windows features (.NET 3.5 comes from Windows Update) and Windows Update – again after every
     // restart until nothing is left –, and the clean-up last (it also deletes the downloaded updates)
     const ORDER: &[&str] = &[
-        "restore-point", "offline", "drives", "no-wu-drivers", "chipset", "gpu", "gpu-settings", "display", "7zip", "vlc", "brave", "steam", "qbittorrent", "programs",
-        "app-settings", "runtimes", "appearance", "wallpaper", "explorer", "tweaks", "mouse-settings", "defender", "calculator",
+        "restore-point", "offline", "wifi", "drives", "no-wu-drivers", "chipset", "gpu", "gpu-settings", "display", "7zip", "vlc", "brave", "steam", "qbittorrent", "programs",
+        "app-settings", "fonts", "runtimes", "appearance", "wallpaper", "explorer", "tweaks", "mouse-settings", "defender", "calculator",
         "hibernation", "restore", "startup", "folders", "pc-name", "microsoft-apps", "xbox-apps", "ad-software", "internet", "downloads", "hemidock", "store", "pins", "shortcuts", "features", "windows-update", "cleanup",
     ];
     v.sort_by_key(|s| ORDER.iter().position(|o| *o == s.id).unwrap_or(usize::MAX));
@@ -553,6 +555,10 @@ pub fn remove_myself() {
     } else {
         let _ = std::fs::remove_dir_all(&local);
     }
+    // a protected backup on a USB stick: only the sealed file stays there, not the opened copy
+    if !fixed {
+        crate::crypto::remove_open_parts(&home);
+    }
     if fixed {
         let _ = std::fs::remove_dir_all(&home);
         let file = original.join("HeMimizer.exe");
@@ -738,4 +744,37 @@ pub fn check_links() -> Vec<(String, Result<String, String>)> {
         }
     }
     out
+}
+
+/// Will the step do something with this plan and backup? For the overview before the run (a step that is not
+/// needed only says so when it runs).
+pub fn applies(id: &str) -> bool {
+    use crate::config;
+    if !crate::options::runs(id) {
+        return false;
+    }
+    let plan = crate::plan::Plan::load().unwrap_or_default();
+    let has_file = |prefix: &str| std::fs::read_dir(config::dir()).is_ok_and(|r| r.flatten().any(|e| e.file_name().to_string_lossy().to_lowercase().starts_with(prefix)));
+    match id {
+        "7zip" | "vlc" | "brave" | "steam" | "qbittorrent" | "hemidock" => plan.has(id),
+        "chipset" => plan.has("amd-chipset"),
+        "gpu" | "gpu-settings" => plan.has("amd-gpu"),
+        "programs" => plan.apps.iter().any(|a| !crate::install::OWN_STEPS.contains(&a.as_str()) && crate::catalog::find(a).is_some_and(|i| i.group != crate::catalog::Group::Driver || a == "nvidia" || a == "intel")),
+        "pc-name" => !config::text("pc-name.txt", false).trim().is_empty(),
+        "wifi" => config::dir().join("wifi").is_dir(),
+        "fonts" => config::dir().join("fonts").join("fonts.txt").is_file(),
+        "mouse-settings" => config::has("mouse.txt"),
+        "pins" => config::has("pins.tar"),
+        "drives" => !config::drives().is_empty(),
+        "folders" => !plan.folders.is_empty(),
+        "app-settings" => config::home().join("apps").is_dir(),
+        "shortcuts" => !crate::shortcuts::programs(&plan).is_empty(),
+        "tweaks" => crate::tweaks::ALL.iter().any(|t| plan.windows_on(t.id) && crate::tweaks::offered(t.id, &plan)),
+        "wallpaper" => has_file("wallpaper."),
+        "explorer" => config::has("explorer-view.reg"),
+        "appearance" => config::has("appearance.reg"),
+        "display" => config::has("display-scaling.reg"),
+        "offline" => !crate::backup::offline().is_empty(),
+        _ => true,
+    }
 }

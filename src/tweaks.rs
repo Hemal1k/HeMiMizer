@@ -163,12 +163,24 @@ pub const ALL: &[Tweak] = &[
     t("signin-email", System, "Hide the e-mail on the sign-in screen", "Only your name is shown", false, |_| sys::set_dword(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "BlockUserFromShowingAccountDetailsOnSignin", 1), || {
         is(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Windows\System", "BlockUserFromShowingAccountDetailsOnSignin", 1)
     }),
+    t("vlc-lean", System, "VLC without extras", "No web plug-ins, no disc AutoPlay, no VLC items in the right-click menu", false, crate::programs::vlc_lean, || None),
+    t("long-paths", System, "Long file paths", "Paths over 260 characters work – torrents and projects with deep folders", false, |_| {
+        sys::set_dword(Root::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "LongPathsEnabled", 1)
+    }, || is(Root::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "LongPathsEnabled", 1)),
     t("network", System, "Home network private", "Other PCs and the NAS are seen (network discovery)", false, network_private, || None),
     t("dns", System, "Encrypted DNS", "Cloudflare 1.1.1.1 over HTTPS – the provider does not see the pages you visit", false, dns, || None),
 ];
 
 pub fn find(id: &str) -> Option<&'static Tweak> {
     ALL.iter().find(|t| t.id == id)
+}
+
+/// The setting is offered: the ones about a program only when the program is chosen.
+pub fn offered(id: &str, plan: &crate::plan::Plan) -> bool {
+    match id {
+        "vlc-lean" => plan.has("vlc"),
+        _ => true,
+    }
 }
 
 pub const GROUPS: &[(Group, &str, char)] = &[
@@ -181,7 +193,7 @@ pub const GROUPS: &[(Group, &str, char)] = &[
 /// The step "Windows settings": every tweak that is on in the plan.
 pub fn run(c: &Ctx) -> Res {
     let plan = crate::plan::Plan::load().unwrap_or_default();
-    let on: Vec<&Tweak> = ALL.iter().filter(|t| plan.windows_on(t.id)).collect();
+    let on: Vec<&Tweak> = ALL.iter().filter(|t| plan.windows_on(t.id) && offered(t.id, &plan)).collect();
     if on.is_empty() {
         return Ok("Nothing chosen".into());
     }

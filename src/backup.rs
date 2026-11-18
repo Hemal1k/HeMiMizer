@@ -74,15 +74,18 @@ pub enum Event {
     Start(usize),
     Log(String),
     Done(usize, Result<String, String>),
+    /// the backup protected with the password (when one was set)
+    Sealed(Result<String, String>),
     Finished,
 }
 
 /// Runs the chosen items (indices of `items()`) on their own thread.
-pub fn run(chosen: Vec<usize>, tx: Sender<Event>, repaint: impl Fn() + Send + 'static) {
+pub fn run(chosen: Vec<usize>, password: Option<String>, tx: Sender<Event>, repaint: impl Fn() + Send + 'static) {
     std::thread::spawn(move || {
         let all = items();
         let parts = config::parts();
         sys::log(&format!("==== Backup: {} ====", chosen.iter().map(|&i| all[i].id).collect::<Vec<_>>().join(", ")));
+        let _ = std::fs::remove_file(crate::crypto::sealed_file());
         for i in chosen {
             let _ = tx.send(Event::Start(i));
             repaint();
@@ -104,6 +107,16 @@ pub fn run(chosen: Vec<usize>, tx: Sender<Event>, repaint: impl Fn() + Send + 's
             sys::log(&format!("backup {id}: {r:?}"));
             let _ = tx.send(Event::Done(i, r));
             repaint();
+        }
+        // protected with the password: the personal parts encrypted (a backup without one replaces an older sealed one)
+        if let Some(pw) = password.filter(|p| !p.is_empty()) {
+            let log = |t: String| {
+                let _ = tx.send(Event::Log(t));
+                repaint();
+            };
+            let r = crate::crypto::seal(&pw, &log);
+            sys::log(&format!("seal: {r:?}"));
+            let _ = tx.send(Event::Sealed(r));
         }
         let _ = tx.send(Event::Finished);
         repaint();

@@ -22,6 +22,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_SystemInformation",
     "Win32_System_Com",
     "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_Security_Credentials",
     "Win32_Storage_FileSystem",
     "Win32_UI_WindowsAndMessaging",
@@ -31,6 +32,9 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
 ] }
+aes-gcm = "0.10"
+pbkdf2 = "0.12"
+sha2 = "0.10"
 
 [build-dependencies]
 winresource = "0.1.34"
@@ -48,3 +52,16 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# the key from the password (600 000 rounds) is slow unoptimized: the crypto optimized in Debug builds too
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.pbkdf2]
+opt-level = 3
+
+[profile.dev.package.aes-gcm]
+opt-level = 3
+
+[profile.dev.package.aes]
+opt-level = 3
