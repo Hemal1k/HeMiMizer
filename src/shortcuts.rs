@@ -160,7 +160,11 @@ pub fn run(c: &Ctx) -> Res {
             // the taskbar reads the layout when File Explorer starts (Windows starts it again by itself, as the user)
             Ok(()) => {
                 let _ = sys::exec("taskkill.exe", &["/f", "/im", "explorer.exe"]);
-                std::thread::sleep(std::time::Duration::from_secs(4));
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                // the pins are the taskbar's own now: the policy and its file go (nothing of HeMimizer stays)
+                let pol = r"Software\Policies\Microsoft\Windows\Explorer";
+                sys::delete_values(Root::Hkcu, pol, &["StartLayoutFile", "LockedStartLayout"]);
+                let _ = std::fs::remove_dir_all(f.parent().unwrap_or(&f));
             }
             Err(e) => failed.push(format!("Taskbar: {e}")),
         }

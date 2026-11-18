@@ -7,8 +7,17 @@ use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, REG_DWORD, REG_SZ, RRF_RT_REG_SZ,
-    RegDeleteTreeW, RegGetValueW, RegSetKeyValueW,
+    RegDeleteKeyValueW, RegDeleteTreeW, RegGetValueW, RegSetKeyValueW,
 };
+
+/// Removes values of a key (missing ones are fine).
+pub fn delete_values(root: Root, key: &str, names: &[&str]) {
+    let k = wide(key);
+    for n in names {
+        let n = wide(n);
+        unsafe { RegDeleteKeyValueW(hkey(root), k.as_ptr(), n.as_ptr()) };
+    }
+}
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Short on purpose: SourceForge answers a full browser string with a bot check (403).
@@ -217,8 +226,12 @@ pub fn exec(exe: &str, args: &[&str]) -> Result<Output, String> {
 
 static LOG: std::sync::Mutex<Option<(PathBuf, std::fs::File)>> = std::sync::Mutex::new(None);
 
-/// HeMimizer.log in "HeMimizer data" next to HeMimizer.exe (for testing); %LOCALAPPDATA%\HeMimizer when that folder is read-only.
+/// HeMimizer.log in "HeMimizer data" next to HeMimizer.exe; %LOCALAPPDATA%\HeMimizer when that folder is read-only.
+/// Only in Debug builds: the release writes no log at all (the user, 2026-11-18 – nothing of HeMimizer stays on the PC).
 pub fn log_init() {
+    if !cfg!(debug_assertions) {
+        return;
+    }
     let data = PathBuf::from(env("LOCALAPPDATA", "")).join("HeMimizer");
     let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from));
     // after a restart the copy in %LOCALAPPDATA%\HeMimizer\app runs: the log stays where HeMimizer was started first

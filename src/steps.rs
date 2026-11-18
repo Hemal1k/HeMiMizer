@@ -508,11 +508,6 @@ fn on_fixed_disk(path: &std::path::Path) -> bool {
     unsafe { GetDriveTypeW(w.as_ptr()) == 3 }
 }
 
-/// Where HeMimizer.log and the to-do file are kept after the end, when the folder "HeMimizer data" is removed.
-pub fn kept_dir() -> PathBuf {
-    data_dir()
-}
-
 /// The folder HeMimizer was started from at first (also after the restarts, when its copy runs).
 fn original_dir() -> PathBuf {
     let origin = std::fs::read_to_string(origin_file()).ok().map(|s| PathBuf::from(s.trim())).filter(|p| p.exists());
@@ -525,46 +520,54 @@ pub fn removes_data() -> bool {
     on_fixed_disk(&original_dir())
 }
 
-/// When the window closes after the last run: HeMimizer deletes its folder "HeMimizer data", its copy for the
-/// restarts and its temporary files right away; HeMimizer.log and the to-do file are kept in %LOCALAPPDATA%\HeMimizer.
-/// The exe that runs cannot be deleted while it runs: Windows deletes it at the next restart (as installers do – no
-/// helper process waits for it). On a USB stick the exe and its folder stay.
+/// When the window closes after the last run, nothing of HeMimizer stays on the PC (the user, 2026-11-18): its folder
+/// "HeMimizer data", %LOCALAPPDATA%\HeMimizer (the copy for the restarts, the state between them) and its temporary
+/// files go right away. The exe that runs cannot be deleted while it runs: Windows deletes it at the next restart (as
+/// installers do – no helper process waits for it). On a USB stick the exe and its folder stay (the kit for the next
+/// installation). A Debug build keeps its log in %LOCALAPPDATA%\HeMimizer (the release writes none).
 pub fn remove_myself() {
     let exe = std::env::current_exe().unwrap_or_default();
     let original = original_dir();
-    let keep = data_dir();
+    let local = data_dir();
     let fixed = on_fixed_disk(&original);
     sys::log(&format!("removing HeMimizer (its folder too: {fixed})"));
-    for d in [std::env::temp_dir().join("HeMimizer"), sys::work_dir(), keep.join("app")] {
-        let _ = std::fs::remove_dir_all(d);
-    }
-    for f in [todo_file(), origin_file(), resume_file(), keep.join("wu-rounds.txt")] {
-        let _ = std::fs::remove_file(f);
-    }
-    if fixed {
-        // the log and the to-do file into %LOCALAPPDATA%\HeMimizer, then the folder goes
-        let home = original.join(crate::config::HOME);
+    let home = original.join(crate::config::HOME);
+    if cfg!(debug_assertions) && fixed {
+        // Debug: the log into %LOCALAPPDATA%\HeMimizer before its folder goes
         sys::log_close();
-        let _ = std::fs::create_dir_all(&keep);
+        let _ = std::fs::create_dir_all(&local);
         if let Ok(rd) = std::fs::read_dir(&home) {
             for e in rd.flatten().filter(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("log") || x.eq_ignore_ascii_case("txt"))) {
-                let to = keep.join(e.file_name());
-                if std::fs::rename(e.path(), &to).is_err() {
-                    let _ = std::fs::copy(e.path(), &to);
-                }
+                let _ = std::fs::copy(e.path(), local.join(e.file_name()));
             }
         }
+    }
+    for d in [std::env::temp_dir().join("HeMimizer"), sys::work_dir(), local.join("app")] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+    let _ = std::fs::remove_file(std::env::temp_dir().join("HeMimizer-ThirdPartyNotices.txt"));
+    if cfg!(debug_assertions) {
+        for f in [todo_file(), origin_file(), resume_file(), local.join("wu-rounds.txt")] {
+            let _ = std::fs::remove_file(f);
+        }
+    } else {
+        let _ = std::fs::remove_dir_all(&local);
+    }
+    if fixed {
         let _ = std::fs::remove_dir_all(&home);
         let file = original.join("HeMimizer.exe");
         if std::fs::remove_file(&file).is_err() && file.exists() {
             delete_at_restart(&file);
         }
     }
-    // the copy for the restarts (or the exe itself) is still running
-    if exe.exists() && (fixed || exe.starts_with(&keep)) {
+    // the copy for the restarts (or the exe itself) is still running: at the next restart, with its folders
+    if exe.exists() && (fixed || exe.starts_with(&local)) {
         delete_at_restart(&exe);
-        if exe.starts_with(keep.join("app")) {
-            delete_at_restart(&keep.join("app"));
+        if exe.starts_with(local.join("app")) {
+            delete_at_restart(&local.join("app"));
+            if !cfg!(debug_assertions) {
+                delete_at_restart(&local);
+            }
         }
     }
 }

@@ -1652,13 +1652,9 @@ impl HeMimizerApp {
         }
         ui.add_space(8.0);
         let bye = if steps::removes_data() {
-            format!(
-                "When you press Done, HeMimizer removes the folder \"HeMimizer data\" and its temporary files; HeMimizer.exe goes at the next restart. HeMimizer.log and the to-do file are kept in {}.",
-                steps::kept_dir().display()
-            )
+            "When you press Done, HeMimizer removes itself – nothing of it stays on this PC (HeMimizer.exe goes at the next restart). Note what is left to do below first."
         } else {
-            let dir = sys::log_path().parent().map(|d| d.display().to_string()).unwrap_or_default();
-            format!("When you press Done, HeMimizer removes its temporary files. It stays on this drive with the backup for the next time; HeMimizer.log and the to-do file are in {dir}.")
+            "When you press Done, HeMimizer removes everything it put on this PC. It stays on its drive with the backup, for the next time."
         };
         ui.add(egui::Label::new(RichText::new(bye).size(12.0).color(p.text3)).wrap());
         ui.add_space(14.0);
@@ -1740,7 +1736,9 @@ impl HeMimizerApp {
         }
         ui.horizontal(|ui| {
             ui.set_min_height(32.0);
-            if matches!(self.phase, Phase::Running | Phase::Finished)
+            // the log exists only in Debug builds
+            if cfg!(debug_assertions)
+                && matches!(self.phase, Phase::Running | Phase::Finished)
                 && Btn::new(tr("Log", "Záznam")).subtle().tip(tr("What HeMimizer did, step by step", "Co HeMimizer dělal, krok po kroku")).show(ui, &p).clicked()
             {
                 acts.push(Action::OpenLog);
@@ -1780,7 +1778,7 @@ impl HeMimizerApp {
                 }
                 // the end: Done closes HeMimizer and removes it with its data (the log and the to-do file stay)
                 Phase::Finished if self.restart_at.is_none() && !self.resume_pending => {
-                    if Btn::new("Done").icon(glyph::COMPLETED).accent().tip("Closes HeMimizer and removes it with its data; the log and the to-do file are kept").show(ui, &p).clicked() {
+                    if Btn::new("Done").icon(glyph::COMPLETED).accent().tip("Closes HeMimizer and removes it – nothing of it stays on the PC").show(ui, &p).clicked() {
                         acts.push(Action::Done);
                     }
                     if self.reboot && Btn::new("Restart PC").icon(glyph::RESTART).show(ui, &p).clicked() {
