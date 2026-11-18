@@ -26,6 +26,7 @@ mod shortcuts;
 mod sys;
 mod theme;
 mod tweaks;
+mod usb;
 mod widgets;
 mod windows;
 
@@ -89,6 +90,34 @@ fn main() -> eframe::Result {
         return Ok(());
     }
     // Debug builds only: try the removal at the end on a copy of the exe
+    // Debug builds only: make a USB stick without the window (--test-usb <disk> <iso> <out file>), for testing
+    if cfg!(debug_assertions) && args.first().map(String::as_str) == Some("--test-usb") && args.len() >= 4 {
+        let o = usb::Options {
+            disk: args[1].parse().unwrap_or(u32::MAX),
+            iso: args[2].clone().into(),
+            gpt: true,
+            label: "WIN11 TEST".into(),
+            bypass_hw: true,
+            bypass_msa: true,
+            local_user: "user".into(),
+            regional: true,
+            no_privacy: true,
+            no_bitlocker: true,
+        };
+        let out = std::path::PathBuf::from(&args[3]);
+        let lines = std::sync::Mutex::new(Vec::<String>::new());
+        let log = |t: String| {
+            let mut l = lines.lock().unwrap();
+            if l.last() != Some(&t) && !(t.starts_with("Copying") && l.last().is_some_and(|x| x.starts_with("Copying"))) {
+                l.push(t);
+            }
+            let _ = std::fs::write(&out, l.join("
+"));
+        };
+        let r = usb::make(&o, &log);
+        log(format!("RESULT: {r:?}"));
+        return Ok(());
+    }
     if cfg!(debug_assertions) && args.iter().any(|a| a == "--test-remove") {
         steps::remove_myself();
         return Ok(());

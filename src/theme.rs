@@ -66,6 +66,8 @@ pub mod glyph {
     pub const MOUSE: char = '\u{E962}';
     pub const MONITOR: char = '\u{E7F4}';
     pub const DRIVE: char = '\u{E8CE}';
+    pub const USB: char = '\u{E88E}';
+    pub const DISC: char = '\u{E958}';
     pub const WINDOWS: char = '\u{E737}';
     pub const APPS: char = '\u{E71D}';
     pub const DOWNLOAD: char = '\u{E896}';
