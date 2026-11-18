@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 #[path = "usb_page.rs"]
 mod usb_page;
+#[path = "iso_page.rs"]
+mod iso_page;
 
 const REPO: &str = "https://github.com/Hemal1k/HeMimizer";
 const RESTART_DELAY: u64 = 20;
@@ -43,6 +45,8 @@ enum Page {
 enum Phase {
     /// "Make a Windows USB stick".
     Usb,
+    /// "Make a smaller Windows".
+    Iso,
     /// A backup protected with a password: the password first.
     Unlock,
     /// The first page: back up this PC (before a reinstall) or set it up (after one).
@@ -104,6 +108,10 @@ enum Action {
     UsbRefresh,
     UsbBrowse,
     UsbMake,
+    IsoOpen,
+    IsoBrowse,
+    IsoDrivers,
+    IsoMake,
     Start,
     Quit,
     AskReboot,
@@ -182,6 +190,8 @@ pub struct HeMimizerApp {
     has_wifi: bool,
     /// the page "Make a Windows USB stick"
     usb: usb_page::UsbUi,
+    /// the page "Make a smaller Windows"
+    iso: iso_page::IsoUi,
     backup_on: Vec<bool>,
     backup_done: Vec<Option<Result<String, String>>>,
     backup_now: Option<usize>,
@@ -287,6 +297,7 @@ impl HeMimizerApp {
             unlock: Default::default(),
             has_wifi: config::has_wifi(),
             usb: usb_page::UsbUi::new(),
+            iso: iso_page::IsoUi::new(),
             backup_now: None,
             backup_log: String::new(),
             btx,
@@ -419,7 +430,7 @@ impl HeMimizerApp {
         ui.horizontal(|ui| {
             ui.set_min_height(40.0);
             // back to the first page from the backup and from the start of the setup
-            let back_to_choose = !self.about && ((matches!(self.phase, Phase::BackedUp | Phase::Start | Phase::Wizard(_)) && self.fresh) || (self.phase == Phase::Usb && !self.usb.running()));
+            let back_to_choose = !self.about && ((matches!(self.phase, Phase::BackedUp | Phase::Start | Phase::Wizard(_)) && self.fresh) || (self.phase == Phase::Usb && !self.usb.running()) || (self.phase == Phase::Iso && !self.iso.running()));
             if self.about || back_to_choose {
                 if Btn::new("").icon(glyph::BACK).subtle().show(ui, &p).clicked() {
                     acts.push(match self.phase {
@@ -440,6 +451,7 @@ impl HeMimizerApp {
                     Phase::Start => tr("Set up this PC", "Nastavit toto PC"),
                     Phase::Unlock => "Protected backup",
                     Phase::Usb => "Windows USB stick",
+                    Phase::Iso => "A smaller Windows",
                     _ => "HeMimizer",
                 }
             };
@@ -577,6 +589,15 @@ impl HeMimizerApp {
             "Make a Windows USB stick",
             "From a Windows 10 or 11 ISO, for UEFI or BIOS – with your choices for the installation (no TPM check, a local account…).",
             Action::UsbOpen,
+            acts,
+        );
+        ui.add_space(6.0);
+        big(
+            ui,
+            glyph::DISC,
+            "Make a smaller Windows",
+            "A lighter Windows 11 ISO like Tiny11: without ads, Teams, Xbox, OneDrive… – the simple choice, or choose yourself what goes and what stays.",
+            Action::IsoOpen,
             acts,
         );
     }
@@ -1902,6 +1923,14 @@ impl HeMimizerApp {
                 acts.push(Action::OpenLog);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| match self.phase {
+                Phase::Iso => {
+                    if Btn::new("Make the ISO").icon(glyph::DISC).accent().enabled(self.iso.ready()).show(ui, &p).clicked() {
+                        acts.push(Action::IsoMake);
+                    }
+                    if !self.iso.running() && Btn::new(tr("Close", "Zavřít")).show(ui, &p).clicked() {
+                        acts.push(Action::Quit);
+                    }
+                }
                 Phase::Usb => {
                     if Btn::new("Make the stick").icon(glyph::USB).accent().enabled(self.usb.ready()).show(ui, &p).clicked() {
                         acts.push(Action::UsbMake);
@@ -2180,6 +2209,34 @@ impl HeMimizerApp {
                         sys::shell_open(&d.display().to_string());
                     }
                 }
+                Action::IsoOpen => self.phase = Phase::Iso,
+                Action::IsoBrowse => {
+                    if let Some(f) = rfd::FileDialog::new().set_title("Windows 11 ISO").add_filter("ISO", &["iso"]).pick_file() {
+                        self.iso.iso = f.display().to_string();
+                    }
+                }
+                Action::IsoDrivers => {
+                    if let Some(d) = rfd::FileDialog::new().set_title("Drivers").pick_folder() {
+                        self.iso.drivers = d.display().to_string();
+                    }
+                }
+                Action::IsoMake => {
+                    let o = self.iso.options();
+                    *self.iso.state.lock().unwrap() = Some(("Starting".into(), None));
+                    let (state, ctx) = (self.iso.state.clone(), ctx.clone());
+                    std::thread::spawn(move || {
+                        let log = |t: String| {
+                            if let Some(s) = state.lock().unwrap().as_mut() {
+                                s.0 = t;
+                            }
+                            ctx.request_repaint();
+                        };
+                        let r = crate::iso::build(&o, &log);
+                        sys::log(&format!("iso: {r:?}"));
+                        *state.lock().unwrap() = Some((String::new(), Some(r)));
+                        ctx.request_repaint();
+                    });
+                }
                 Action::UsbOpen => {
                     self.phase = Phase::Usb;
                     self.usb.disks = crate::usb::disks();
@@ -2391,6 +2448,7 @@ impl eframe::App for HeMimizerApp {
                 Phase::Wizard(page) => 10 + page as usize,
                 Phase::Choose | Phase::Unlock => 0,
                 Phase::Usb => 5,
+                Phase::Iso => 6,
                 Phase::BackingUp | Phase::BackedUp => 1,
                 Phase::Start => 2,
                 Phase::Running => 3,
@@ -2402,6 +2460,7 @@ impl eframe::App for HeMimizerApp {
                     Phase::Choose => self.choose_page(ui, &mut acts),
                     Phase::Unlock => self.unlock_page(ui, &mut acts),
                     Phase::Usb => self.usb_page(ui, &mut acts),
+                    Phase::Iso => self.iso_page(ui, &mut acts),
                     Phase::Wizard(page) => self.wizard_page(ui, page, &mut acts),
                     Phase::BackingUp | Phase::BackedUp => self.backup_page(ui, &mut acts),
                     Phase::Start => self.start_page(ui, &mut acts),

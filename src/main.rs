@@ -14,7 +14,9 @@ mod crypto;
 mod debloat;
 mod look;
 mod options;
+mod ownership;
 mod downloads;
+mod iso;
 mod drivers;
 mod hardware;
 mod i18n;
@@ -90,6 +92,25 @@ fn main() -> eframe::Result {
         return Ok(());
     }
     // Debug builds only: try the removal at the end on a copy of the exe
+    // Debug builds only: make a smaller ISO without the window (--test-iso <iso> <out iso> <out log>), the Pro edition
+    if cfg!(debug_assertions) && args.first().map(String::as_str) == Some("--test-iso") && args.len() >= 4 {
+        let out = std::path::PathBuf::from(&args[3]);
+        let lines = std::sync::Mutex::new(Vec::<String>::new());
+        let log = |t: String| {
+            let mut l = lines.lock().unwrap();
+            l.push(t);
+            let _ = std::fs::write(&out, l.join("
+"));
+        };
+        let iso = std::path::PathBuf::from(&args[1]);
+        let eds = iso::editions(&iso);
+        log(format!("editions: {eds:?}"));
+        let index = eds.ok().and_then(|v| v.iter().find(|(_, n)| n.ends_with(" Pro")).map(|(i, _)| *i)).unwrap_or(1);
+        let o = iso::Options { iso, index, out: args[2].clone().into(), chosen: iso::simple(), add_hemimizer: true, ..Default::default() };
+        let r = iso::build(&o, &log);
+        log(format!("RESULT: {r:?}"));
+        return Ok(());
+    }
     // Debug builds only: make a USB stick without the window (--test-usb <disk> <iso> <out file>), for testing
     if cfg!(debug_assertions) && args.first().map(String::as_str) == Some("--test-usb") && args.len() >= 4 {
         let o = usb::Options {
