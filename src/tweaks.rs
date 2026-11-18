@@ -88,6 +88,9 @@ pub const ALL: &[Tweak] = &[
     t("edge", Privacy, "Edge quieter", "No sidebar, shopping offers and running in the background", true, edge, || {
         is(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Edge", "HubsSidebarEnabled", 0)
     }),
+    t("security-nags", Privacy, "No nagging in Windows Security", "Dismisses \"sign in with a Microsoft account\" and \"memory integrity is off\"", true, security_nags, || {
+        is(Root::Hkcu, r"Software\Microsoft\Windows Security Health\State", "AccountProtection_MicrosoftAccount_Disconnected", 1)
+    }),
     // ---------------------------------------------------------------- taskbar and Start
     t("tb-left", Taskbar, "Taskbar on the left", "Start and the apps at the left edge, as in Windows 10", false, |_| sys::set_dword(Root::Hkcu, ADV, "TaskbarAl", 0), || {
         is(Root::Hkcu, ADV, "TaskbarAl", 0)
@@ -218,11 +221,45 @@ fn ai_apps(_c: &Ctx) -> Result<(), String> {
     sys::set_dword(Root::Hklm, AI, "DisableSettingsAgent", 1)
 }
 
-fn widgets(_c: &Ctx) -> Result<(), String> {
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Dsh", "AllowNewsAndInterests", 0)?;
-    // Windows may refuse the value of the user (it guards it) – the policy above is enough
+const DSH: &str = r"SOFTWARE\Policies\Microsoft\Dsh";
+
+fn widgets(c: &Ctx) -> Result<(), String> {
+    // Windows may refuse the value of the user (it guards it) – the policy is enough
     let _ = sys::set_dword(Root::Hkcu, ADV, "TaskbarDa", 0);
-    Ok(())
+    let Err(e) = sys::set_dword(Root::Hklm, DSH, "AllowNewsAndInterests", 0) else { return Ok(()) };
+    // some Windows lock the key of the policy even for administrators (access denied, 2026-11-18): the system account
+    // writes it, and when even that fails the Widgets app goes
+    sys::log(&format!("widgets policy: {e}"));
+    c.log("Widgets off (as the system)");
+    let _ = as_system(&format!(r"reg.exe add HKLM\{DSH} /v AllowNewsAndInterests /t REG_DWORD /d 0 /f"));
+    if dw(Root::Hklm, DSH, "AllowNewsAndInterests") == Some(0) {
+        return Ok(());
+    }
+    c.log("Removing the Widgets app");
+    crate::debloat::remove_appx(&["MicrosoftWindows.Client.WebExperience"]).map_err(|e2| format!("{e}; {e2}"))
+}
+
+/// Runs a command line as the system account (a scheduled task) and waits for it (at most 30 s).
+fn as_system(line: &str) -> Result<(), String> {
+    const TASK: &str = "HeMimizer-as-system";
+    sys::run("schtasks.exe", &["/create", "/tn", TASK, "/tr", line, "/sc", "once", "/st", "00:00", "/ru", "SYSTEM", "/rl", "HIGHEST", "/f"])?;
+    let r = sys::run("schtasks.exe", &["/run", "/tn", TASK]).map(|_| ());
+    for _ in 0..30 {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let q = sys::exec("schtasks.exe", &["/query", "/tn", TASK, "/fo", "list"]).map(|o| o.text).unwrap_or_default();
+        if !q.contains("Running") && !q.contains("Spuštěno") {
+            break;
+        }
+    }
+    let _ = sys::exec("schtasks.exe", &["/delete", "/tn", TASK, "/f"]);
+    r
+}
+
+/// The warnings of Windows Security that only ask for a choice the user made: "sign in with a Microsoft account" and
+/// "memory integrity is off" – dismissed as with their Dismiss link.
+fn security_nags(_c: &Ctx) -> Result<(), String> {
+    sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows Security Health\State", "AccountProtection_MicrosoftAccount_Disconnected", 1)?;
+    sys::set_dword(Root::Hklm, r"SOFTWARE\Microsoft\Windows Security Health\State", "Hardware_HVCI_Off", 1)
 }
 
 fn web_search(_c: &Ctx) -> Result<(), String> {

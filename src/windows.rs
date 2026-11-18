@@ -548,17 +548,58 @@ pub fn calculator(_c: &Ctx) -> Res {
     Ok(String::new())
 }
 
-pub fn notepad(_c: &Ctx) -> Res {
-    if sys::is_running("Notepad.exe") {
-        return Err(tr("Close Notepad first – it would overwrite the settings.", "Nejdřív zavři Poznámkový blok – přepsal by nastavení.").into());
+// ---------------------------------------------------------------- mouse
+
+/// The settings of the mouse the backup takes along.
+pub struct Mouse {
+    /// pointer speed 1–20 (10 = the default of Windows)
+    pub speed: u32,
+    /// lines a wheel notch scrolls (u32::MAX = a page)
+    pub lines: u32,
+    /// characters a sideways notch scrolls
+    pub chars: u32,
+    /// the double-click time in ms
+    pub double: u32,
+}
+
+impl Mouse {
+    pub fn now() -> Mouse {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETMOUSESPEED, SPI_GETWHEELSCROLLCHARS, SPI_GETWHEELSCROLLLINES, SystemParametersInfoW};
+        let get = |action, default: u32| {
+            let mut v = 0u32;
+            if unsafe { SystemParametersInfoW(action, 0, (&mut v as *mut u32).cast(), 0) } != 0 { v } else { default }
+        };
+        let double = unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
+        Mouse { speed: get(SPI_GETMOUSESPEED, 10), lines: get(SPI_GETWHEELSCROLLLINES, 3), chars: get(SPI_GETWHEELSCROLLCHARS, 3), double }
     }
-    if config::has("notepad-settings.dat") {
-        let dir = std::path::PathBuf::from(sys::env("LOCALAPPDATA", "")).join(r"Packages\Microsoft.WindowsNotepad_8wekyb3d8bbwe\Settings");
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        std::fs::write(dir.join("settings.dat"), config::bytes("notepad-settings.dat")).map_err(|e| format!("{}: {e}", dir.display()))?;
+
+    pub fn to_text(&self) -> String {
+        format!("speed={}\r\nlines={}\r\nchars={}\r\ndouble={}\r\n", self.speed, self.lines, self.chars, self.double)
     }
-    sys::set_dword(Root::Hklm, r"SOFTWARE\Policies\WindowsNotepad", "DisableAIFeatures", 1)?;
-    Ok(String::new())
+
+    fn from_text(t: &str) -> Option<Mouse> {
+        let get = |name: &str| t.lines().find_map(|l| l.trim().strip_prefix(&format!("{name}=")).and_then(|v| v.trim().parse::<u32>().ok()));
+        Some(Mouse { speed: get("speed")?.clamp(1, 20), lines: get("lines").unwrap_or(3), chars: get("chars").unwrap_or(3), double: get("double").unwrap_or(500) })
+    }
+}
+
+/// The step "Mouse": the pointer speed, scrolling and double-click time from the backup (saved for the user, at once).
+pub fn mouse(_c: &Ctx) -> Res {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SPI_SETDOUBLECLICKTIME, SPI_SETMOUSESPEED, SPI_SETWHEELSCROLLCHARS, SPI_SETWHEELSCROLLLINES, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SystemParametersInfoW,
+    };
+    let Some(m) = Mouse::from_text(&config::text("mouse.txt", false)) else {
+        return Ok("Not in the backup".into());
+    };
+    let save = SPIF_UPDATEINIFILE | SPIF_SENDCHANGE;
+    unsafe {
+        // the speed goes in pvParam itself, the others in uiParam
+        SystemParametersInfoW(SPI_SETMOUSESPEED, 0, m.speed as usize as _, save);
+        SystemParametersInfoW(SPI_SETWHEELSCROLLLINES, m.lines, std::ptr::null_mut(), save);
+        SystemParametersInfoW(SPI_SETWHEELSCROLLCHARS, m.chars, std::ptr::null_mut(), save);
+        SystemParametersInfoW(SPI_SETDOUBLECLICKTIME, m.double, std::ptr::null_mut(), save);
+    }
+    Ok(format!("speed {} of 20, {} lines per notch", m.speed, m.lines))
 }
 
 // ---------------------------------------------------------------- the name of the PC

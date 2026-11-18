@@ -18,6 +18,12 @@ pub struct Plan {
     pub accepted: bool,
     /// the steps of Windows switched on (options.rs); None = the defaults
     pub windows: Option<Vec<String>>,
+    /// what the user wants for each new program (catalog ids): a shortcut on the desktop, pinned to Start, pinned to
+    /// the taskbar, started with Windows – nothing else is done to them
+    pub desktop: Vec<String>,
+    pub start_pins: Vec<String>,
+    pub taskbar: Vec<String>,
+    pub startup: Vec<String>,
 }
 
 fn file() -> std::path::PathBuf {
@@ -36,13 +42,17 @@ impl Plan {
             folders: v["folders"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
             accepted: v["accepted"].as_bool().unwrap_or(false),
             windows: v["windows"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()),
+            desktop: list(&v["desktop"]),
+            start_pins: list(&v["start_pins"]),
+            taskbar: list(&v["taskbar"]),
+            startup: list(&v["startup"]),
         })
     }
 
     /// Into the backup; the name of the PC also as pc-name.txt (the step that renames the PC reads it).
     pub fn save(&self) -> Result<(), String> {
         std::fs::create_dir_all(crate::config::dir()).map_err(|e| e.to_string())?;
-        let v = json!({ "apps": self.apps, "offline": self.offline, "pc_name": self.pc_name.trim(), "folders": self.folders, "accepted": self.accepted, "windows": self.windows });
+        let v = json!({ "apps": self.apps, "offline": self.offline, "pc_name": self.pc_name.trim(), "folders": self.folders, "accepted": self.accepted, "windows": self.windows, "desktop": self.desktop, "start_pins": self.start_pins, "taskbar": self.taskbar, "startup": self.startup });
         std::fs::write(file(), serde_json::to_string_pretty(&v).unwrap_or_default()).map_err(|e| e.to_string())?;
         let name = crate::config::dir().join("pc-name.txt");
         if self.pc_name.trim().is_empty() {
@@ -116,4 +126,20 @@ pub fn show_folder(stored: &str) -> String {
 pub fn valid_pc_name(name: &str) -> bool {
     let n = name.trim();
     n.is_empty() || (n.len() <= 15 && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') && !n.chars().all(|c| c.is_ascii_digit()) && !n.starts_with('-'))
+}
+
+fn list(v: &Value) -> Vec<String> {
+    v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default()
+}
+
+/// One of the lists of the plan: is `id` in it, put it in or out.
+pub fn in_list(l: &[String], id: &str) -> bool {
+    l.iter().any(|x| x == id)
+}
+
+pub fn set_in_list(l: &mut Vec<String>, id: &str, on: bool) {
+    l.retain(|x| x != id);
+    if on {
+        l.push(id.to_string());
+    }
 }

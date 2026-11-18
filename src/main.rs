@@ -21,6 +21,7 @@ mod install;
 mod plan;
 mod programs;
 mod steps;
+mod shortcuts;
 mod sys;
 mod theme;
 mod tweaks;
@@ -52,6 +53,8 @@ fn report(rows: Vec<(String, Result<String, String>)>) -> String {
 
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // a packed backup next to the exe: unpacked first (before the log makes the folder)
+    backup::unpack_if_packed();
     config::tidy_up();
     sys::log_init();
     let build = sys::get_sz(sys::Root::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "CurrentBuild").unwrap_or_default();
@@ -98,7 +101,9 @@ fn main() -> eframe::Result {
             .with_app_id("HeMimizer")
             .with_inner_size([840.0, 700.0])
             .with_min_inner_size([600.0, 480.0])
-            .with_icon(icon),
+            .with_icon(icon)
+            // transparent, so the Mica of Windows 11 shows behind the pages
+            .with_transparent(true),
         centered: true,
         ..Default::default()
     };

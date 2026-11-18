@@ -10,8 +10,10 @@ use std::ptr::null_mut;
 use std::sync::Arc;
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::Graphics::Dwm::{
-    DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
+    DWMSBT_MAINWINDOW, DWMWA_CAPTION_COLOR, DWMWA_COLOR_DEFAULT, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_TEXT_COLOR,
+    DWMWA_USE_IMMERSIVE_DARK_MODE, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
 };
+use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_BINARY, RRF_RT_REG_DWORD, RegGetValueW};
 
 pub const SEMIBOLD: &str = "semibold";
@@ -61,7 +63,7 @@ pub mod glyph {
     pub const PIN: char = '\u{E718}';
     pub const SHIELD: char = '\u{EA18}';
     pub const COLOR: char = '\u{E790}';
-    pub const NOTE: char = '\u{E70B}';
+    pub const MOUSE: char = '\u{E962}';
     pub const MONITOR: char = '\u{E7F4}';
     pub const DRIVE: char = '\u{E8CE}';
     pub const WINDOWS: char = '\u{E737}';
@@ -376,18 +378,25 @@ fn colorref(c: Color32) -> u32 {
     c.r() as u32 | (c.g() as u32) << 8 | (c.b() as u32) << 16
 }
 
-/// The title bar of Windows in the colours of the window (as WinUI with its own title bar).
-pub fn style_window(hwnd: isize, p: &Palette) {
+/// The title bar of Windows in the colours of the window, and the Mica material of Windows 11 behind everything that
+/// is not a card (as HeMiPad). Returns true when Mica is on (false on Windows 10 and older Windows 11, which then get
+/// the plain background colour).
+pub fn style_window(hwnd: isize, p: &Palette) -> bool {
     if hwnd == 0 {
-        return;
+        return false;
     }
     let hwnd = hwnd as HWND;
     let dark: i32 = (!p.light) as i32;
-    let caption = colorref(p.bg);
-    let text = colorref(p.text);
     unsafe {
         DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE as _, &dark as *const i32 as _, 4);
+        let backdrop: i32 = DWMSBT_MAINWINDOW;
+        let mica = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE as _, &backdrop as *const i32 as _, 4) == 0;
+        // the title bar: the default colours let Mica through; without Mica the colour of the window
+        let (caption, text) = if mica { (DWMWA_COLOR_DEFAULT, DWMWA_COLOR_DEFAULT) } else { (colorref(p.bg), colorref(p.text)) };
         DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR as _, &caption as *const u32 as _, 4);
         DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR as _, &text as *const u32 as _, 4);
+        let m = if mica { -1 } else { 0 };
+        DwmExtendFrameIntoClientArea(hwnd, &MARGINS { cxLeftWidth: m, cxRightWidth: m, cyTopHeight: m, cyBottomHeight: m });
+        mica
     }
 }

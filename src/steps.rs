@@ -274,7 +274,7 @@ pub fn all() -> Vec<Step> {
             "Nainstaluje všechny aktualizace kromě ovladačů; další produkty Microsoftu zapnuté, stahování z jiných PC vypnuté",
             windows::windows_update
         ),
-        step!("notepad", Windows, "Notepad", "Poznámkový blok", "The settings from the backup", "Nastavení ze zálohy", windows::notepad),
+        step!("mouse-settings", Windows, "Mouse", "Myš", "Pointer speed, scrolling and double-click speed from the backup", "Rychlost ukazatele, posouvání a dvojklik ze zálohy", windows::mouse),
         step!("calculator", Windows, "Calculator", "Kalkulačka", "Uninstalled", "Odinstalovat", windows::calculator),
         step!(
             "restore",
@@ -323,6 +323,15 @@ pub fn all() -> Vec<Step> {
         ),
         step!("pc-name", Windows, "PC name", "Název PC", "The name of the PC", "Název počítače", windows::rename_pc),
         step!(
+            "shortcuts",
+            Programs,
+            "Shortcuts and start",
+            "Zástupci a spouštění",
+            "Desktop, Start, taskbar and the start with Windows of the new programs, as chosen",
+            "Plocha, Start, hlavní panel a spouštění nových programů podle volby",
+            crate::shortcuts::run
+        ),
+        step!(
             "cleanup",
             Cleanup,
             "Clean up",
@@ -340,8 +349,8 @@ pub fn all() -> Vec<Step> {
     // restart until nothing is left –, and the clean-up last (it also deletes the downloaded updates)
     const ORDER: &[&str] = &[
         "restore-point", "offline", "drives", "no-wu-drivers", "chipset", "gpu", "gpu-settings", "display", "7zip", "vlc", "brave", "steam", "qbittorrent", "programs",
-        "app-settings", "runtimes", "appearance", "wallpaper", "explorer", "tweaks", "defender", "notepad", "calculator",
-        "hibernation", "restore", "startup", "pins", "folders", "pc-name", "microsoft-apps", "xbox-apps", "ad-software", "internet", "downloads", "hemidock", "store", "features", "windows-update", "cleanup",
+        "app-settings", "runtimes", "appearance", "wallpaper", "explorer", "tweaks", "mouse-settings", "defender", "calculator",
+        "hibernation", "restore", "startup", "folders", "pc-name", "microsoft-apps", "xbox-apps", "ad-software", "internet", "downloads", "hemidock", "store", "pins", "shortcuts", "features", "windows-update", "cleanup",
     ];
     v.sort_by_key(|s| ORDER.iter().position(|o| *o == s.id).unwrap_or(usize::MAX));
     for s in v.iter_mut() {
@@ -499,37 +508,72 @@ fn on_fixed_disk(path: &std::path::Path) -> bool {
     unsafe { GetDriveTypeW(w.as_ptr()) == 3 }
 }
 
-/// When the window closes after the last run: HeMimizer deletes itself, its config, its copy for the restarts and
-/// its temporary files. Only HeMimizer.log and the to-do file stay. On a USB stick the exe stays (it is the kit for
-/// the next installation). Done by a hidden cmd a few seconds after HeMimizer has ended.
+/// Where HeMimizer.log and the to-do file are kept after the end, when the folder "HeMimizer data" is removed.
+pub fn kept_dir() -> PathBuf {
+    data_dir()
+}
+
+/// The folder HeMimizer was started from at first (also after the restarts, when its copy runs).
+fn original_dir() -> PathBuf {
+    let origin = std::fs::read_to_string(origin_file()).ok().map(|s| PathBuf::from(s.trim())).filter(|p| p.exists());
+    origin.unwrap_or_else(crate::config::exe_dir)
+}
+
+/// The folder "HeMimizer data" goes at the end (not on a USB stick or a network drive: there it is the kit for the
+/// next installation).
+pub fn removes_data() -> bool {
+    on_fixed_disk(&original_dir())
+}
+
+/// When the window closes after the last run: HeMimizer deletes its folder "HeMimizer data", its copy for the
+/// restarts and its temporary files right away; HeMimizer.log and the to-do file are kept in %LOCALAPPDATA%\HeMimizer.
+/// The exe that runs cannot be deleted while it runs: Windows deletes it at the next restart (as installers do – no
+/// helper process waits for it). On a USB stick the exe and its folder stay.
 pub fn remove_myself() {
     let exe = std::env::current_exe().unwrap_or_default();
-    let origin = std::fs::read_to_string(origin_file()).ok().map(|s| PathBuf::from(s.trim())).filter(|p| p.exists());
-    let mut del: Vec<String> = Vec::new();
-    let mut dirs: Vec<PathBuf> = vec![std::env::temp_dir().join("HeMimizer"), sys::work_dir()];
-    let original = origin.clone().unwrap_or_else(|| exe.parent().map(PathBuf::from).unwrap_or_default());
-    if on_fixed_disk(&original) {
-        del.push(original.join("HeMimizer.exe").display().to_string());
-        // the folder of HeMimizer except the log and the to-do file
-        dirs.push(original.join(crate::config::HOME).join("config"));
-        dirs.push(original.join(crate::config::HOME).join("installers"));
+    let original = original_dir();
+    let keep = data_dir();
+    let fixed = on_fixed_disk(&original);
+    sys::log(&format!("removing HeMimizer (its folder too: {fixed})"));
+    for d in [std::env::temp_dir().join("HeMimizer"), sys::work_dir(), keep.join("app")] {
+        let _ = std::fs::remove_dir_all(d);
     }
-    // the folder in %LOCALAPPDATA% (resume, origin, to-do, the copy for the restarts) – unless the log is in it
-    if !sys::log_path().starts_with(data_dir()) {
-        dirs.push(data_dir());
-    } else {
-        dirs.push(data_dir().join("app"));
+    for f in [todo_file(), origin_file(), resume_file(), keep.join("wu-rounds.txt")] {
+        let _ = std::fs::remove_file(f);
     }
-    let mut cmd = String::from("ping -n 4 127.0.0.1 >nul");
-    for f in del {
-        cmd.push_str(&format!(" & del /f /q \"{f}\" 2>nul"));
+    if fixed {
+        // the log and the to-do file into %LOCALAPPDATA%\HeMimizer, then the folder goes
+        let home = original.join(crate::config::HOME);
+        sys::log_close();
+        let _ = std::fs::create_dir_all(&keep);
+        if let Ok(rd) = std::fs::read_dir(&home) {
+            for e in rd.flatten().filter(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("log") || x.eq_ignore_ascii_case("txt"))) {
+                let to = keep.join(e.file_name());
+                if std::fs::rename(e.path(), &to).is_err() {
+                    let _ = std::fs::copy(e.path(), &to);
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&home);
+        let file = original.join("HeMimizer.exe");
+        if std::fs::remove_file(&file).is_err() && file.exists() {
+            delete_at_restart(&file);
+        }
     }
-    for d in dirs {
-        cmd.push_str(&format!(" & rmdir /s /q \"{}\" 2>nul", d.display()));
+    // the copy for the restarts (or the exe itself) is still running
+    if exe.exists() && (fixed || exe.starts_with(&keep)) {
+        delete_at_restart(&exe);
+        if exe.starts_with(keep.join("app")) {
+            delete_at_restart(&keep.join("app"));
+        }
     }
-    sys::log(&format!("removing HeMimizer: {cmd}"));
-    use std::os::windows::process::CommandExt;
-    let _ = std::process::Command::new("cmd.exe").raw_arg(format!("/c {cmd}")).creation_flags(0x0800_0000 | 0x0000_0008).spawn();
+}
+
+/// Windows deletes the file (or the empty folder) at the next restart.
+fn delete_at_restart(path: &std::path::Path) {
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
+    let w = sys::wide(&path.display().to_string());
+    unsafe { MoveFileExW(w.as_ptr(), std::ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT) };
 }
 
 const TASK: &str = "HeMimizer - continue";

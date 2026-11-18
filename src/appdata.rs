@@ -2,6 +2,10 @@
 //! copies them (folders with robocopy, single files, `reg export`), the setup puts them back after the programs are
 //! installed. Programs that sync their settings through an account (browsers, chat, games) are not listed. VLC,
 //! qBittorrent, Brave and Steam have their own parts in config.rs.
+//!
+//! Besides the programs of the wizard, programs HeMimizer does not install (Adobe, DaVinci Resolve, Blender…) are
+//! offered when they are found on this PC (`FOUND`): their settings go back before the user installs them again, and
+//! they find them at their first start.
 
 use crate::steps::{Ctx, Res};
 use crate::sys;
@@ -15,13 +19,32 @@ pub struct Data {
     pub skip: &'static [&'static str],
     /// what it takes, for the window
     pub what: &'static str,
+    /// the name of a program that is not in the catalog (offered when found on this PC); empty = a catalog program
+    pub name: &'static str,
 }
 
 const fn d(id: &'static str, paths: &'static [&'static str], skip: &'static [&'static str], what: &'static str) -> Data {
-    Data { id, paths, skip, what }
+    Data { id, paths, skip, what, name: "" }
+}
+
+/// A program HeMimizer does not install, offered when its settings are on this PC.
+const fn f(id: &'static str, name: &'static str, paths: &'static [&'static str], skip: &'static [&'static str], what: &'static str) -> Data {
+    Data { id, paths, skip, what, name }
+}
+
+impl Data {
+    /// Not a program of the wizard: offered when found on this PC.
+    pub fn found_only(&self) -> bool {
+        !self.name.is_empty()
+    }
+
+    pub fn title(&self) -> &'static str {
+        if self.name.is_empty() { crate::catalog::find(self.id).map(|i| i.name).unwrap_or(self.id) } else { self.name }
+    }
 }
 
 pub const ALL: &[Data] = &[
+    // ---------------------------------------------------------------- programs of the wizard
     d("7zip", &[r"HKCU\Software\7-Zip"], &[], "Options and the context menu"),
     d("winrar", &[r"HKCU\Software\WinRAR"], &[], "Options"),
     d("notepadpp", &[r"{APPDATA}\Notepad++"], &["backup", "session.xml"], "Options, themes and plug-ins"),
@@ -35,12 +58,47 @@ pub const ALL: &[Data] = &[
     d("paintnet", &[r"{APPDATA}\paint.net"], &[], "Settings"),
     d("thunderbird", &[r"{APPDATA}\Thunderbird"], &["Crash Reports"], "The profile with the mail – can be large"),
     d("libreoffice", &[r"{APPDATA}\LibreOffice"], &["4\\user\\backup"], "Settings, dictionaries and templates"),
-    d("vscode", &[r"{APPDATA}\Code\User"], &["workspaceStorage", "History", "globalStorage"], "Settings, key bindings and snippets"),
+    d("vscode", &[r"{APPDATA}\Code\User", r"{PROFILE}\.vscode\extensions"], &["workspaceStorage", "History", "globalStorage", ".obsolete"], "Settings, key bindings, snippets and extensions"),
     d("git", &[r"{PROFILE}\.gitconfig"], &[], "Your name, e-mail and options"),
+    d("acrobat", &[r"HKCU\Software\Adobe\Adobe Acrobat"], &[], "Preferences"),
+    d("discord", &[r"{APPDATA}\discord\settings.json"], &[], "Start, tray and window options – the rest comes with your account"),
+    d("spotify", &[r"{APPDATA}\Spotify\prefs"], &[], "Sound quality, start and other options of the app"),
+    d("nodejs", &[r"{PROFILE}\.npmrc"], &[], "npm settings"),
+    d("python", &[r"{APPDATA}\pip"], &[], "pip settings"),
+    d("hemilauncher", &[r"{APPDATA}\HeMi\HeMiLauncher"], &[], "Its settings"),
+    // ---------------------------------------------------------------- found on this PC (not installed by HeMimizer)
+    f("adobe", "Adobe apps", &[r"{APPDATA}\Adobe", r"{DOCUMENTS}\Adobe"], &["Common", "Logs", "CRLogs", "LogTransport2", "OOBE", "Flash Player", "AAMUpdater", "Adobe PCD", "Acrobat"], "Photoshop, Premiere, Illustrator, Lightroom…: settings, presets, workspaces, shortcuts"),
+    f("davinci", "DaVinci Resolve", &[r"{APPDATA}\Blackmagic Design\DaVinci Resolve"], &["logs", "Support\\logs"], "Preferences, keyboard, LUTs, Fusion templates and the local projects"),
+    f("blender", "Blender", &[r"{APPDATA}\Blender Foundation\Blender"], &[], "Preferences, add-ons and the startup file"),
+    f("krita", "Krita", &[r"{APPDATA}\krita", r"{LOCALAPPDATA}\kritarc"], &[], "Settings, brushes and workspaces"),
+    f("inkscape", "Inkscape", &[r"{APPDATA}\inkscape"], &[], "Preferences, extensions and palettes"),
+    f("jetbrains", "JetBrains IDEs", &[r"{APPDATA}\JetBrains"], &[], "Settings, key maps and plug-ins of IntelliJ, PyCharm, Rider…"),
+    f("ableton", "Ableton Live", &[r"{APPDATA}\Ableton"], &["Live Reports"], "Preferences and the library setup"),
+    f("flstudio", "FL Studio", &[r"{DOCUMENTS}\Image-Line\FL Studio\Settings"], &[], "Settings and templates"),
+    f("terminal", "Windows Terminal", &[r"{LOCALAPPDATA}\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json"], &[], "Profiles, colours and key bindings"),
+    f("foobar", "foobar2000", &[r"{APPDATA}\foobar2000-v2"], &[], "Settings, layout and the library"),
+    f("mpchc", "MPC-HC", &[r"HKCU\Software\MPC-HC\MPC-HC"], &[], "Options"),
+    f("everything", "Everything", &[r"{APPDATA}\Everything"], &[], "Options and the index setup"),
+    f("filezilla", "FileZilla", &[r"{APPDATA}\FileZilla"], &[], "Sites and options"),
+    f("winscp", "WinSCP", &[r"HKCU\Software\Martin Prikryl\WinSCP 2"], &[], "Sites and options"),
+    f("putty", "PuTTY", &[r"HKCU\Software\SimonTatham\PuTTY"], &[], "Saved sessions"),
+    f("irfanview", "IrfanView", &[r"{APPDATA}\IrfanView"], &[], "Options"),
 ];
 
 pub fn find(id: &str) -> Option<&'static Data> {
     ALL.iter().find(|d| d.id == id && !d.paths.is_empty())
+}
+
+/// The programs of the wizard whose settings HeMimizer cannot take along (they keep them in an account, or nowhere
+/// worth copying).
+pub fn not_covered(apps: &[String]) -> Vec<&'static str> {
+    const OWN_PARTS: &[&str] = &["vlc", "qbittorrent", "brave", "steam", "amd-gpu"];
+    apps.iter()
+        .filter_map(|id| crate::catalog::find(id))
+        .filter(|i| matches!(i.group, crate::catalog::Group::App | crate::catalog::Group::Browser))
+        .filter(|i| find(i.id).is_none() && !OWN_PARTS.contains(&i.id))
+        .map(|i| i.name)
+        .collect()
 }
 
 /// A path of the table on this PC.
@@ -62,7 +120,15 @@ pub fn present(id: &str) -> bool {
     find(id).is_some_and(|d| {
         d.paths.iter().any(|p| match reg_key(p) {
             Some(k) => sys::key_exists(sys::Root::Hkcu, k),
-            None => resolve(p).exists(),
+            // a folder counts only with something in it that is taken (%AppData%\Adobe may hold only Flash Player)
+            None => {
+                let r = resolve(p);
+                if r.is_dir() {
+                    std::fs::read_dir(&r).is_ok_and(|rd| rd.flatten().any(|e| !d.skip.iter().any(|s| e.file_name().to_string_lossy().eq_ignore_ascii_case(s))))
+                } else {
+                    r.exists()
+                }
+            }
         })
     })
 }
@@ -127,8 +193,8 @@ pub fn restore(c: &Ctx) -> Res {
     let plan = crate::plan::Plan::load().unwrap_or_default();
     let mut done = Vec::new();
     let mut failed = Vec::new();
-    for d in ALL.iter().filter(|d| !d.paths.is_empty() && plan.has(d.id) && dir(d.id).is_dir()) {
-        let name = crate::catalog::find(d.id).map(|i| i.name).unwrap_or(d.id);
+    for d in ALL.iter().filter(|d| !d.paths.is_empty() && (plan.has(d.id) || d.found_only()) && dir(d.id).is_dir()) {
+        let name = d.title();
         c.log(name);
         let mut ok = true;
         for (i, p) in d.paths.iter().enumerate() {

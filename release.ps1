@@ -1,9 +1,7 @@
-# Builds the downloads of a HeMimizer release - the same on a PC and in the GitHub workflow (.github/workflows/release.yml):
+# Builds the download of a HeMimizer release - the same on a PC and in the GitHub workflow (.github/workflows/release.yml):
 #   build\dist\HeMimizer.exe         the program for x64 (one file; it runs from any folder, e.g. a USB stick)
-#   build\dist\HeMimizer-arm64.exe   the same for Windows on ARM
-# Needs: Rust (stable, MSVC), and for ARM64 the MSVC ARM64 build tools (on a PC without them ARM64 is left out with a
-# warning; the GitHub workflow always builds both). The version comes from Cargo.toml.
-param([switch]$NoArm)
+# HeMimizer has no ARM64 version (the author's choice, 2026-11-18): it installs x64 drivers and programs.
+# Needs: Rust (stable, MSVC). The version comes from Cargo.toml.
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 Set-Location $root
@@ -14,9 +12,8 @@ $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches
 $dist = Join-Path $root 'build\dist'
 Remove-Item $dist -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $dist | Out-Null
-$targets = [ordered]@{ x64 = 'x86_64-pc-windows-msvc'; arm64 = 'aarch64-pc-windows-msvc' }
+$targets = [ordered]@{ x64 = 'x86_64-pc-windows-msvc' }
 foreach ($arch in $targets.Keys) {
-    if ($arch -eq 'arm64' -and $NoArm) { continue }
     $triple = $targets[$arch]
     $ErrorActionPreference = 'Continue'
     rustup target add $triple *> $null
@@ -24,7 +21,6 @@ foreach ($arch in $targets.Keys) {
     $ok = $LASTEXITCODE -eq 0
     $ErrorActionPreference = 'Stop'
     if (-not $ok) {
-        if ($arch -eq 'arm64' -and -not $env:GITHUB_ACTIONS) { Write-Warning 'ARM64 could not be built on this PC (the MSVC ARM64 build tools are missing?) - x64 only.'; continue }
         throw "The build failed ($arch)."
     }
     $name = if ($arch -eq 'x64') { "$app.exe" } else { "$app-$arch.exe" }

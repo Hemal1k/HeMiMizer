@@ -11,21 +11,14 @@ fn program_files() -> String {
     sys::env("ProgramFiles", r"C:\Program Files")
 }
 
-fn public_desktop() -> PathBuf {
+pub fn public_desktop() -> PathBuf {
     PathBuf::from(sys::env("PUBLIC", r"C:\Users\Public")).join("Desktop")
 }
 
-fn start_menu() -> PathBuf {
+pub fn start_menu() -> PathBuf {
     PathBuf::from(sys::env("ProgramData", r"C:\ProgramData")).join(r"Microsoft\Windows\Start Menu\Programs")
 }
 
-fn remove_shortcuts(names: &[&str]) {
-    let user_desktop = sys::profile().join("Desktop");
-    for n in names {
-        sys::remove_file(public_desktop().join(n));
-        sys::remove_file(user_desktop.join(n));
-    }
-}
 
 /// The version of an installed program (Apps → Installed apps) whose name starts with `name`.
 pub fn installed_version(name: &str) -> Option<String> {
@@ -141,10 +134,8 @@ pub fn vlc(c: &Ctx) -> Res {
     if crate::install::ensure(c, "vlc")? {
         let dir = vlc_dir();
         c.log(tr("Removing the parts of VLC that are not wanted", "Odebírám nechtěné součásti VLC"));
-        // as installed by hand: no shortcuts, no web plug-ins, no disc playback (AutoPlay), no context menus;
-        // the file types of audio and video stay
-        remove_shortcuts(&["VLC media player.lnk"]);
-        let _ = std::fs::remove_dir_all(start_menu().join("VideoLAN"));
+        // no web plug-ins, no disc playback (AutoPlay), no context menus; the file types of audio and video stay (the
+        // shortcuts and the start with Windows follow the choice of the wizard: the step "shortcuts")
         let ax = format!(r"{dir}\axvlc.dll");
         if Path::new(&ax).exists() {
             let _ = sys::run("regsvr32.exe", &["/u", "/s", &ax]);
@@ -225,9 +216,7 @@ pub fn brave(c: &Ctx) -> Res {
     if !crate::install::chosen("brave") {
         return Ok(crate::install::not_chosen());
     }
-    if crate::install::ensure(c, "brave")? {
-        remove_shortcuts(&["Brave.lnk"]);
-    }
+    crate::install::ensure(c, "brave")?;
     let version = installed_version("Brave").unwrap_or_default();
     c.log(tr("Setting up Brave", "Nastavuji Brave"));
     sys::dwords(Root::Hklm, BRAVE_POLICY_KEY, BRAVE_POLICIES)?;
@@ -265,7 +254,6 @@ pub fn steam(c: &Ctx) -> Res {
         return Ok(tr("Already installed (updates itself)", "Už je nainstalovaný (aktualizuje se sám)").into());
     }
     crate::install::ensure(c, "steam")?;
-    remove_shortcuts(&["Steam.lnk"]);
     Ok("Steam".into())
 }
 
@@ -278,9 +266,7 @@ pub fn qbittorrent(c: &Ctx) -> Res {
     crate::install::ensure(c, "qbittorrent")?;
     let version = installed_version("qBittorrent").unwrap_or_default();
     let exe = format!(r"{}\qBittorrent\qbittorrent.exe", program_files());
-    // as installed by hand: Start menu yes, desktop no, not with Windows, a firewall rule, long paths
-    remove_shortcuts(&["qBittorrent.lnk"]);
-    sys::delete_value(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Run", "qBittorrent");
+    // a firewall rule, long paths (the shortcuts and the start with Windows follow the choice of the wizard)
     sys::set_dword(Root::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "LongPathsEnabled", 1)?;
     let has_rule = sys::exec("netsh.exe", &["advfirewall", "firewall", "show", "rule", "name=qBittorrent"]).map(|o| o.code == 0).unwrap_or(false);
     if !has_rule {
@@ -708,7 +694,7 @@ pub fn fix_shortcuts(dir: &Path) -> Result<(), String> {
            $t = $sh.CreateShortcut($_.FullName).TargetPath; \
            if ($t -and -not (Test-Path -LiteralPath $t)) {{ \
              $new = Get-ChildItem -LiteralPath @({starts}) -Filter $_.Name -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1; \
-             if ($new) {{ Copy-Item -LiteralPath $new.FullName -Destination $_.FullName -Force; \"fixed $($_.Name)\" }} else {{ \"missing $($_.Name) -> $t\" }} }} }}",
+             if ($new) {{ Copy-Item -LiteralPath $new.FullName -Destination $_.FullName -Force; \"fixed $($_.Name)\" }} else {{ Remove-Item -LiteralPath $_.FullName -Force; \"left out $($_.Name) (not installed)\" }} }} }}",
         pinned = dir.display().to_string().replace('\'', "''")
     ))
     .map(|_| ())

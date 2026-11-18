@@ -45,9 +45,8 @@ from amd.com. Nothing else is sent anywhere.
 | File | For |
 |---|---|
 | `HeMimizer.exe` | The program for x64 – one file, run it from any folder (it asks for administrator rights). |
-| `HeMimizer-arm64.exe` | The same for Windows on ARM. |
 
-Windows 11 (Windows 10 mostly works). Also in [HeMi Launcher](https://github.com/Hemal1k/HeMiLauncher).
+Windows 11 (Windows 10 mostly works), x64 only. Also in [HeMi Launcher](https://github.com/Hemal1k/HeMiLauncher).
 
 ## Build
 

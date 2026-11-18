@@ -65,6 +65,9 @@ pub enum Source {
     Store(&'static str),
     /// the newest release of github.com/Hemal1k/<repo>: (repo, asset)
     GitHub(&'static str, &'static str),
+    /// an MSI of the newest release of another project on GitHub (not in winget): (owner/repo, the end of the asset's
+    /// name – the name carries the version)
+    Release(&'static str, &'static str),
     /// the own steps of HeMimizer (the AMD drivers)
     Own,
 }
@@ -145,7 +148,8 @@ pub const ALL: &[Item] = &[
     it("python", "Python 3.13", "Programming language", App, Developer, Winget("Python.Python.3.13"), ""),
     it("nodejs", "Node.js LTS", "JavaScript runtime", App, Developer, Winget("OpenJS.NodeJS.LTS"), ""),
     it("java", "Java 21 (Eclipse Temurin)", "Runs Java programs (Minecraft and others)", App, Developer, Winget("EclipseAdoptium.Temurin.21.JRE"), ""),
-    // ArtCraft (getartcraft.com): open-source creative apps, early versions
+    // ArtCraft (getartcraft.com): open-source creative apps, early versions; the launcher installs and updates them
+    it("craftlauncher", "ArtCraft Launcher", "Installs every Craft app and keeps them up to date", App, Creative, Release("storytold/craft-launcher", "-windows-x64.msi"), ""),
     it("artcraft", "ArtCraft", "AI images and video, in one studio", App, Creative, Winget("ArtCraft.ArtCraft"), ""),
     it("photocraft", "PhotoCraft", "Image editor", App, Creative, Winget("ArtCraft.PhotoCraft"), ""),
     it("vectorcraft", "VectorCraft", "Vector illustration", App, Creative, Winget("ArtCraft.VectorCraft"), ""),

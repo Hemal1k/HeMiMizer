@@ -206,10 +206,10 @@ pub fn parts() -> Vec<Part> {
         ("vlc", "VLC", cap_vlc),
         ("qbittorrent", "qBittorrent", cap_qbittorrent),
         ("brave", "Brave", cap_brave),
-        ("notepad", tr("Notepad", "Poznámkový blok"), cap_notepad),
+        ("mouse", "Mouse", cap_mouse),
         ("amd", tr("AMD graphics settings", "Nastavení grafiky AMD"), cap_amd),
         ("scaling", tr("Display scaling", "Měřítko displeje"), cap_scaling),
-        ("drives", tr("Network drives", "Síťové disky"), cap_drives),
+        ("drives", "Mapped network drives", cap_drives),
         ("oc", tr("OC profile", "OC profil"), cap_oc),
     ]
 }
@@ -366,11 +366,12 @@ fn cap_brave() -> Result<String, String> {
     Ok(format!("{} {n}", tr("look and settings, extensions:", "vzhled a nastavení, rozšíření:")))
 }
 
-fn cap_notepad() -> Result<String, String> {
-    let f = PathBuf::from(sys::env("LOCALAPPDATA", "")).join(r"Packages\Microsoft.WindowsNotepad_8wekyb3d8bbwe\Settings\settings.dat");
-    let d = std::fs::read(&f).map_err(|e| format!("{e} – {}", tr("close Notepad and try again", "zavři Poznámkový blok a zkus to znovu")))?;
-    write("notepad-settings.dat", &d)?;
-    Ok(String::new())
+/// The pointer speed (1–20), the lines and characters a wheel notch scrolls, the double-click time (ms) – as
+/// mouse.txt (name=value).
+fn cap_mouse() -> Result<String, String> {
+    let m = crate::windows::Mouse::now();
+    write("mouse.txt", m.to_text().as_bytes())?;
+    Ok(format!("speed {} of 20, {} lines per notch", m.speed, m.lines))
 }
 
 /// `reg export` of a key as text.

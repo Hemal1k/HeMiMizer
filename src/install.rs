@@ -24,8 +24,9 @@ pub fn not_chosen() -> String {
     "Not chosen in the wizard".into()
 }
 
-/// Installers that refuse to run with administrator rights (HeMimizer has them): run as the signed-in user.
-const AS_USER: &[&str] = &["spotify"];
+/// Installers for one user that refuse administrator rights or ask for them again (HeMimizer has them; Discord asked
+/// for an administrator during its installation, 2026-11-18): run as the signed-in user.
+const AS_USER: &[&str] = &["spotify", "discord"];
 
 /// Programs with their own steps (their settings from the backup come after the installation).
 pub const OWN_STEPS: &[&str] = &["7zip", "vlc", "brave", "steam", "qbittorrent", "hemidock", "amd-chipset", "amd-gpu"];
@@ -145,9 +146,32 @@ pub fn download(item: &Item, log: &dyn Fn(String)) -> Result<(), String> {
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             sys::download(&github_url(repo, asset), &dir.join(asset), None)
         }
+        Source::Release(repo, end) => {
+            log(format!("{} {}", tr("Downloading", "Stahuji"), item.name));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let (url, name) = release_asset(repo, end)?;
+            sys::download(&url, &dir.join(name), None)
+        }
         Source::Store(_) => Err("a Microsoft Store app – it is installed on the new PC from the internet".into()),
         Source::Own => Ok(()),
     }
+}
+
+/// The asset of the newest release of `repo` whose name ends with `end`: (download link, file name).
+fn release_asset(repo: &str, end: &str) -> Result<(String, String), String> {
+    let text = sys::fetch(&format!("https://api.github.com/repos/{repo}/releases/latest"), None)?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    v["assets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find_map(|a| {
+            let name = a["name"].as_str()?;
+            name.ends_with(end).then(|| (a["browser_download_url"].as_str().unwrap_or("").to_string(), name.to_string()))
+        })
+        .filter(|(u, _)| !u.is_empty())
+        .ok_or_else(|| format!("{repo}: no *{end} in the newest release"))
 }
 
 fn github_url(repo: &str, asset: &str) -> String {
@@ -246,6 +270,15 @@ pub fn ensure(c: &Ctx, id: &str) -> Result<bool, String> {
             sys::download(&github_url(repo, asset), &file, None)?;
             c.log(format!("{} {}", tr("Installing", "Instaluji"), item.name));
             sys::run(&file.display().to_string(), &["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/ALLUSERS"])?;
+        }
+        Source::Release(repo, end) => {
+            c.log(format!("{} {}", tr("Downloading", "Stahuji"), item.name));
+            let (url, name) = release_asset(repo, end)?;
+            let file = sys::work_dir().join(&name);
+            sys::download(&url, &file, None)?;
+            c.log(format!("{} {}", tr("Installing", "Instaluji"), item.name));
+            sys::run("msiexec.exe", &["/i", &file.display().to_string(), "/quiet", "/norestart"])?;
+            sys::remove_file(&file);
         }
         Source::Own => return Ok(false),
     }

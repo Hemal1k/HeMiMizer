@@ -25,9 +25,7 @@ pub fn items() -> Vec<Item> {
     v.push(Item { id: FOLDERS, name: "Your folders" });
     // the settings of the programs of the wizard (shown only for the programs chosen)
     for d in crate::appdata::ALL {
-        if let Some(i) = crate::catalog::find(d.id) {
-            v.push(Item { id: d.id, name: i.name });
-        }
+        v.push(Item { id: d.id, name: d.title() });
     }
     v
 }
@@ -232,4 +230,51 @@ pub fn download_installers(log: &dyn Fn(String)) -> Result<String, String> {
         dir.display()
     );
     if failed.is_empty() { Ok(text) } else { Err(format!("{text}\n{}", failed.join("\n"))) }
+}
+
+/// The name of the packed backup next to the folder.
+pub const ZIP: &str = "HeMimizer backup.zip";
+
+/// Packs the backup (the folder "HeMimizer data" and HeMimizer.exe) into one .zip next to them – one file is easier to
+/// move. Stored without compression: the installers are compressed already, and it is fast. The folder stays (the
+/// .zip is checked first); HeMimizer unpacks a .zip it finds next to itself at its start.
+pub fn pack() -> Result<String, String> {
+    let to = config::save_to();
+    let zip = to.join(ZIP);
+    let _ = std::fs::remove_file(&zip);
+    let mut what = vec![config::HOME.to_string()];
+    if to.join("HeMimizer.exe").is_file() {
+        what.push("HeMimizer.exe".into());
+    }
+    let (z, dir) = (zip.display().to_string(), to.display().to_string());
+    let mut args = vec!["-a", "-c", "-f", &z, "--options", "zip:compression=store", "-C", &dir];
+    args.extend(what.iter().map(String::as_str));
+    let o = sys::exec(&system_tar(), &args)?;
+    if o.code != 0 {
+        let _ = std::fs::remove_file(&zip);
+        return Err(format!("tar {}: {}", o.code, o.text.trim().lines().last().unwrap_or("")));
+    }
+    let size = std::fs::metadata(&zip).map(|m| m.len()).unwrap_or(0);
+    Ok(format!("{} ({:.1} GB)", zip.display(), size as f64 / 1e9))
+}
+
+/// At the start: a packed backup next to HeMimizer.exe without its folder is unpacked (the exe in it is left out –
+/// it is the one that runs).
+pub fn unpack_if_packed() {
+    let dir = config::exe_dir();
+    let zip = dir.join(ZIP);
+    if !zip.is_file() || dir.join(config::HOME).exists() {
+        return;
+    }
+    let (z, d) = (zip.display().to_string(), dir.display().to_string());
+    match sys::exec(&system_tar(), &["-x", "-f", &z, "-C", &d, "--exclude", "HeMimizer.exe"]) {
+        Ok(o) if o.code == 0 => sys::log(&format!("unpacked {z}")),
+        Ok(o) => sys::log(&format!("unpack {z}: tar {} {}", o.code, o.text.trim())),
+        Err(e) => sys::log(&format!("unpack {z}: {e}")),
+    }
+}
+
+/// tar of Windows (it makes and reads .zip), not another one found first on the PATH.
+fn system_tar() -> String {
+    format!(r"{}\System32\tar.exe", sys::env("SystemRoot", r"C:\Windows"))
 }

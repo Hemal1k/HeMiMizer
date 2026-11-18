@@ -90,6 +90,7 @@ enum Action {
     Done,
     RunBackup,
     OpenFolder,
+    Pack,
     Start,
     Quit,
     AskReboot,
@@ -132,6 +133,8 @@ pub struct HeMimizerApp {
     source: theme::Source,
     theme_checked: Instant,
     hwnd: isize,
+    /// Mica of Windows 11 behind the window (transparent background)
+    mica: bool,
     /// The theme chosen in the settings.
     look: crate::look::Look,
     about: bool,
@@ -147,6 +150,10 @@ pub struct HeMimizerApp {
     need_files: Option<Vec<(String, String, String, String)>>,
     /// The backup: the items, which are on, their results, what it does now.
     backup_items: Vec<crate::backup::Item>,
+    /// programs HeMimizer does not install whose settings are on this PC (Adobe, DaVinci Resolve…)
+    found_apps: Vec<&'static str>,
+    /// packing the backup into a .zip: None = not asked, Some(None) = packing, Some(Some(result)) = done
+    pack: std::sync::Arc<std::sync::Mutex<Option<Option<Result<String, String>>>>>,
     backup_on: Vec<bool>,
     backup_done: Vec<Option<Result<String, String>>>,
     backup_now: Option<usize>,
@@ -187,7 +194,7 @@ impl HeMimizerApp {
             Ok(RawWindowHandle::Win32(w)) => w.hwnd.get(),
             _ => 0,
         };
-        theme::style_window(hwnd, &p);
+        let mica = theme::style_window(hwnd, &p);
         let steps = steps::all();
         let chosen: Vec<usize> = if mode == Mode::Resume {
             let ids = steps::pending_resume();
@@ -225,6 +232,7 @@ impl HeMimizerApp {
             source,
             theme_checked: Instant::now(),
             hwnd,
+            mica,
             look,
             about: false,
             dialog: None,
@@ -240,6 +248,8 @@ impl HeMimizerApp {
             backup_on: { let saved = crate::backup::saved_choice(); crate::backup::items().iter().map(|i| saved.iter().any(|s| s == i.id)).collect() },
             backup_done: crate::backup::items().iter().map(|_| None).collect(),
             backup_items: crate::backup::items(),
+            found_apps: crate::appdata::ALL.iter().filter(|d| d.found_only() && crate::appdata::present(d.id)).map(|d| d.id).collect(),
+            pack: Default::default(),
             backup_now: None,
             backup_log: String::new(),
             btx,
@@ -259,10 +269,11 @@ impl HeMimizerApp {
             this_pc: None,
             reached: 0,
         };
-        // the settings of the programs: on unless switched off (they are offered only for the programs chosen)
+        // the settings of the programs: on when they are on this PC (they are offered only for the programs chosen)
         for (i, it) in app.backup_items.iter().enumerate() {
+            // on when its settings are on this PC (a program not on it has nothing to take)
             if crate::appdata::find(it.id).is_some() {
-                app.backup_on[i] = true;
+                app.backup_on[i] = crate::appdata::present(it.id);
             }
         }
         if mode == Mode::Resume {
@@ -357,7 +368,7 @@ impl HeMimizerApp {
             self.source = source;
             self.p = theme::palette(&source);
             theme::apply(ctx, &self.p);
-            theme::style_window(self.hwnd, &self.p);
+            self.mica = theme::style_window(self.hwnd, &self.p);
         }
     }
 
@@ -1089,8 +1100,8 @@ impl HeMimizerApp {
         if let Some((_, app)) = Self::PROGRAM_PARTS.iter().find(|(part, _)| *part == id) {
             return self.plan.has(app);
         }
-        if crate::appdata::find(id).is_some() {
-            return self.plan.has(id);
+        if let Some(d) = crate::appdata::find(id) {
+            return if d.found_only() { self.found_apps.contains(&id) } else { self.plan.has(id) };
         }
         true
     }
@@ -1107,7 +1118,7 @@ impl HeMimizerApp {
             "defender" => "The protection settings and exclusions",
             "appearance" => "Dark mode and the accent colour",
             "explorer" => "File extensions, hidden files and the view",
-            "notepad" => "Its settings",
+            "mouse" => "Pointer speed, scrolling and double-click speed",
             "scaling" => "The size of text and apps, per monitor",
             "steam" => "Where your games are (Defender leaves them out)",
             "vlc" => "Settings and skin",
@@ -1126,7 +1137,7 @@ impl HeMimizerApp {
             "defender" => glyph::SHIELD,
             "appearance" => glyph::COLOR,
             "explorer" => glyph::FOLDER,
-            "notepad" => glyph::NOTE,
+            "mouse" => glyph::MOUSE,
             "scaling" => glyph::MONITOR,
             "drives" => glyph::DRIVE,
             _ => crate::catalog::find(id).map(|i| crate::catalog::kind_glyph(i.kind)).unwrap_or(glyph::SETTINGS),
@@ -1189,6 +1200,42 @@ impl HeMimizerApp {
             ui.add_space(6.0);
             let where_ = format!("{} {}", tr("Into", "Do"), config::dir().parent().map(|d| d.display().to_string()).unwrap_or_default());
             ui.label(RichText::new(where_).size(12.0).color(p.text3));
+            // at the end: one .zip is easier to move than the folder – asked, not done by itself
+            if self.phase == Phase::BackedUp {
+                ui.add_space(14.0);
+                let state = self.pack.lock().unwrap().clone();
+                card(ui, &p, |ui| {
+                    row_layout(ui, 36.0, |ui| {
+                        Self::icon_tile(ui, &p, glyph::SAVE, 32.0);
+                        ui.add_space(8.0);
+                        let (title, line, color) = match &state {
+                            None => ("Pack it into one .zip?", "One file is easier to copy to another drive. HeMimizer unpacks it by itself when it lies next to it.".to_string(), p.text2),
+                            Some(None) => ("Packing…", String::new(), p.text2),
+                            Some(Some(Ok(t))) => ("Packed", t.clone(), p.text2),
+                            Some(Some(Err(e))) => ("Not packed", e.clone(), p.critical),
+                        };
+                        let w = (ui.available_width() - 150.0).max(80.0);
+                        ui.allocate_ui_with_layout(vec2(w, 36.0), Layout::top_down(Align::Min), |ui| {
+                            ui.spacing_mut().item_spacing.y = 1.0;
+                            ui.label(RichText::new(title).size(14.0).color(p.text));
+                            if !line.is_empty() {
+                                ui.add(egui::Label::new(RichText::new(line).size(12.0).color(color)).wrap());
+                            }
+                        });
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| match &state {
+                            Some(None) => {
+                                ui.add(egui::Spinner::new().size(16.0).color(p.accent_text));
+                            }
+                            Some(Some(Ok(_))) => {}
+                            _ => {
+                                if Btn::new("Pack into .zip").show(ui, &p).clicked() {
+                                    acts.push(Action::Pack);
+                                }
+                            }
+                        });
+                    });
+                });
+            }
             return;
         }
         let row = |this: &Self, ui: &mut egui::Ui, i: usize, acts: &mut Vec<Action>| {
@@ -1196,13 +1243,15 @@ impl HeMimizerApp {
             let mut tags: Vec<(String, Color32)> = Vec::new();
             let detail = if item.id == "drives" {
                 if this.found_drives.is_empty() {
-                    "No network drives on this PC".to_string()
+                    "No network drives are mapped on this PC".to_string()
                 } else {
-                    let list: Vec<String> = this.found_drives.iter().map(|(l, s)| format!("{l}: {s}")).collect();
-                    format!("{} – the password is asked on the new PC", list.join(", "))
+                    let letters: Vec<String> = this.found_drives.iter().map(|(l, _)| format!("{l}:")).collect();
+                    format!("All drives mapped on this PC ({}) – the passwords are asked on the new PC", letters.join(", "))
                 }
             } else if let Some(d) = crate::appdata::find(item.id) {
-                if !crate::appdata::present(item.id) {
+                if d.found_only() {
+                    tags.push(("Found on this PC".into(), p.accent_text));
+                } else if !crate::appdata::present(item.id) {
                     tags.push(("Not on this PC".into(), p.text3));
                 }
                 d.what.to_string()
@@ -1237,6 +1286,15 @@ impl HeMimizerApp {
             }
             for i in &programs {
                 row(self, ui, *i, acts);
+            }
+            // the programs chosen whose settings stay in their account
+            let rest = crate::appdata::not_covered(&self.plan.apps);
+            if !rest.is_empty() && !programs.is_empty() {
+                ui.add_space(2.0);
+                ui.add(
+                    egui::Label::new(RichText::new(format!("{} – their settings come back when you sign in, or they have none to take along.", rest.join(", "))).size(12.0).color(p.text3))
+                        .wrap(),
+                );
             }
         }
     }
@@ -1334,6 +1392,64 @@ impl HeMimizerApp {
             let names: Vec<&str> = self.plan.licensed().iter().map(|i| i.name).collect();
             ui.add(egui::Label::new(RichText::new(format!("Licence terms of {} are shown at the setup, before they are installed.", names.join(", "))).size(12.0).color(p.text3)).wrap());
         }
+        // where each new program goes: only what is ticked here is done
+        let progs = crate::shortcuts::programs(&self.plan);
+        if !progs.is_empty() {
+            ui.add_space(14.0);
+            section(ui, &p, "Shortcuts and start");
+            ui.add(
+                egui::Label::new(
+                    RichText::new("Where the new programs go. Desktop not ticked: the shortcut its installer puts there is removed. Start with Windows not ticked: it does not start by itself.")
+                        .size(12.0)
+                        .color(p.text2),
+                )
+                .wrap(),
+            );
+            ui.add_space(6.0);
+            let plan = &mut self.plan;
+            card(ui, &p, |ui| {
+                egui::Grid::new("shortcuts").num_columns(5).spacing(vec2(22.0, 8.0)).min_col_width(64.0).show(ui, |ui| {
+                    ui.label(RichText::new("Program").size(12.0).color(p.text2));
+                    for h in ["Desktop", "Start", "Taskbar", "With Windows"] {
+                        ui.label(RichText::new(h).size(12.0).color(p.text2));
+                    }
+                    ui.end_row();
+                    for item in &progs {
+                        ui.label(RichText::new(item.name).size(13.0).color(p.text));
+                        for list in [&mut plan.desktop, &mut plan.start_pins, &mut plan.taskbar] {
+                            let on = crate::plan::in_list(list, item.id);
+                            if Self::check(ui, &p, on) {
+                                crate::plan::set_in_list(list, item.id, !on);
+                            }
+                        }
+                        if crate::shortcuts::can_start(item.id) {
+                            let on = crate::plan::in_list(&plan.startup, item.id);
+                            if Self::check(ui, &p, on) {
+                                crate::plan::set_in_list(&mut plan.startup, item.id, !on);
+                            }
+                        } else {
+                            ui.label(RichText::new("–").size(13.0).color(p.text3)).on_hover_text("It does not start with Windows by itself");
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+        }
+    }
+
+    /// A small tick box (true when clicked).
+    fn check(ui: &mut egui::Ui, p: &Palette, on: bool) -> bool {
+        let (rect, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), egui::Sense::click());
+        let fill = if on { p.accent } else { p.card };
+        let stroke = if on { p.accent } else if resp.hovered() { p.text2 } else { p.text3 };
+        ui.painter().rect(rect, 4.0, fill, Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
+        if on {
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph::CHECK.to_string(), theme::icon(12.0), p.on_accent);
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        resp.clicked()
     }
 
     /// Before the run: the licence terms of the programs, the installers of the drivers, the password of the NAS, Run.
@@ -1535,12 +1651,15 @@ impl HeMimizerApp {
             return;
         }
         ui.add_space(8.0);
-        let dir = sys::log_path().parent().map(|d| d.display().to_string()).unwrap_or_default();
-        let bye = tr(
-            "When you close this window, HeMimizer removes itself and its temporary files. HeMimizer.log and the to-do file stay in {dir}.",
-            "Po zavření okna se HeMimizer smaže i se svými dočasnými soubory. HeMimizer.log a soubor s ručními úkoly zůstanou v {dir}.",
-        )
-        .replace("{dir}", &dir);
+        let bye = if steps::removes_data() {
+            format!(
+                "When you press Done, HeMimizer removes the folder \"HeMimizer data\" and its temporary files; HeMimizer.exe goes at the next restart. HeMimizer.log and the to-do file are kept in {}.",
+                steps::kept_dir().display()
+            )
+        } else {
+            let dir = sys::log_path().parent().map(|d| d.display().to_string()).unwrap_or_default();
+            format!("When you press Done, HeMimizer removes its temporary files. It stays on this drive with the backup for the next time; HeMimizer.log and the to-do file are in {dir}.")
+        };
         ui.add(egui::Label::new(RichText::new(bye).size(12.0).color(p.text3)).wrap());
         ui.add_space(14.0);
         section(ui, &p, tr("Left to do by hand", "Zbývá udělat ručně"));
@@ -1661,7 +1780,7 @@ impl HeMimizerApp {
                 }
                 // the end: Done closes HeMimizer and removes it with its data (the log and the to-do file stay)
                 Phase::Finished if self.restart_at.is_none() && !self.resume_pending => {
-                    if Btn::new("Done").icon(glyph::COMPLETED).accent().tip("Closes HeMimizer and removes it with its data; the log and the to-do file stay").show(ui, &p).clicked() {
+                    if Btn::new("Done").icon(glyph::COMPLETED).accent().tip("Closes HeMimizer and removes it with its data; the log and the to-do file are kept").show(ui, &p).clicked() {
                         acts.push(Action::Done);
                     }
                     if self.reboot && Btn::new("Restart PC").icon(glyph::RESTART).show(ui, &p).clicked() {
@@ -1882,6 +2001,16 @@ impl HeMimizerApp {
                         sys::shell_open(&d.display().to_string());
                     }
                 }
+                Action::Pack => {
+                    *self.pack.lock().unwrap() = Some(None);
+                    let (state, ctx) = (self.pack.clone(), ctx.clone());
+                    std::thread::spawn(move || {
+                        let r = crate::backup::pack();
+                        sys::log(&format!("pack: {r:?}"));
+                        *state.lock().unwrap() = Some(Some(r));
+                        ctx.request_repaint();
+                    });
+                }
                 Action::Start => {
                     if self.phase == Phase::Start {
                         self.start(ctx);
@@ -1991,10 +2120,12 @@ impl eframe::App for HeMimizerApp {
         }
 
         let p = self.p;
+        // transparent where Windows 11 shows Mica, else the colour of the theme
+        let bg = if self.mica { egui::Color32::TRANSPARENT } else { p.bg };
         let mut acts = Vec::new();
         if !self.about {
             egui::Panel::bottom("footer")
-                .frame(egui::Frame::new().fill(p.bg).inner_margin(Margin { left: 28, right: 28, top: 10, bottom: 16 }))
+                .frame(egui::Frame::new().fill(bg).inner_margin(Margin { left: 28, right: 28, top: 10, bottom: 16 }))
                 .show_separator_line(false)
                 .show(ui, |ui| {
                     if self.close_warned && self.phase == Phase::Running {
@@ -2013,7 +2144,7 @@ impl eframe::App for HeMimizerApp {
                     self.footer(ui, &mut acts)
                 });
         }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(p.bg).inner_margin(Margin { left: 28, right: 28, top: 14, bottom: 4 })).show(ui, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(bg).inner_margin(Margin { left: 28, right: 28, top: 14, bottom: 4 })).show(ui, |ui| {
             self.header(ui, &mut acts);
             if self.about {
                 self.about_page(ui, &mut acts);
@@ -2048,6 +2179,6 @@ impl eframe::App for HeMimizerApp {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        self.p.bg.to_normalized_gamma_f32()
+        if self.mica { [0.0; 4] } else { self.p.bg.to_normalized_gamma_f32() }
     }
 }

@@ -6,7 +6,7 @@ use std::process::Command;
 use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, REG_DWORD, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, REG_DWORD, REG_SZ, RRF_RT_REG_SZ,
     RegDeleteTreeW, RegGetValueW, RegSetKeyValueW,
 };
 
@@ -136,11 +136,6 @@ pub fn key_exists(root: Root, key: &str) -> bool {
     ok
 }
 
-pub fn delete_value(root: Root, key: &str, name: &str) {
-    let (k, n) = (wide(key), wide(name));
-    unsafe { RegDeleteKeyValueW(hkey(root), k.as_ptr(), n.as_ptr()) };
-}
-
 pub fn delete_tree(root: Root, key: &str) {
     let k = wide(key);
     unsafe { RegDeleteTreeW(hkey(root), k.as_ptr()) };
@@ -244,6 +239,11 @@ pub fn log_init() {
             return;
         }
     }
+}
+
+/// Closes the log file (it can be moved then); later lines are not written.
+pub fn log_close() {
+    *LOG.lock().unwrap() = None;
 }
 
 pub fn log_path() -> PathBuf {
@@ -376,7 +376,7 @@ pub fn join_url(base: &str, link: &str) -> String {
 
 // ---------------------------------------------------------------- folders
 
-fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
+pub fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
     let mut p: windows_sys::core::PWSTR = null_mut();
