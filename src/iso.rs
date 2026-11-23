@@ -114,14 +114,13 @@ fn dism(args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Opened without a drive letter, into a hidden folder (the same as the USB stick: no new drive pops up).
 fn mount_iso(iso: &Path) -> Result<PathBuf, String> {
-    let l = sys::ps(&format!("$i = Mount-DiskImage -ImagePath {} -PassThru\n($i | Get-Volume).DriveLetter", q(&iso.display().to_string())))?;
-    let l = l.trim().chars().last().filter(|c| c.is_ascii_alphabetic()).ok_or("The ISO could not be opened")?;
-    Ok(PathBuf::from(format!("{l}:\\")))
+    crate::usb::open_iso(iso)
 }
 
 fn dismount_iso(iso: &Path) {
-    let _ = sys::ps(&format!("Dismount-DiskImage -ImagePath {} | Out-Null", q(&iso.display().to_string())));
+    crate::usb::close_iso(iso);
 }
 
 /// The image in an ISO: install.wim or install.esd.

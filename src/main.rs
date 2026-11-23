@@ -17,11 +17,13 @@ mod options;
 mod ownership;
 mod downloads;
 mod iso;
+mod msiso;
 mod drivers;
 mod hardware;
 mod i18n;
 mod install;
 mod plan;
+mod printscreen;
 mod programs;
 mod steps;
 mod shortcuts;
@@ -92,6 +94,17 @@ fn main() -> eframe::Result {
         return Ok(());
     }
     // Debug builds only: try the removal at the end on a copy of the exe
+    // Debug builds only: the download links of Microsoft without the window (--test-msiso)
+    if cfg!(debug_assertions) && args.first().map(String::as_str) == Some("--test-msiso") {
+        let r = msiso::start(msiso::Product::Windows11).and_then(|s| {
+            let langs = msiso::languages(&s)?;
+            let cz = langs.iter().find(|l| l.name == "Czech").cloned().ok_or("no Czech")?;
+            let (url, file) = msiso::link(&s, &cz)?;
+            Ok(format!("{} languages; {file}; {} bytes; {}", langs.len(), msiso::size(&url), &url[..60]))
+        });
+        println!("{r:?}");
+        return Ok(());
+    }
     // Debug builds only: make a smaller ISO without the window (--test-iso <iso> <out iso> <out log>), the Pro edition
     if cfg!(debug_assertions) && args.first().map(String::as_str) == Some("--test-iso") && args.len() >= 4 {
         let out = std::path::PathBuf::from(&args[3]);
@@ -111,17 +124,18 @@ fn main() -> eframe::Result {
         log(format!("RESULT: {r:?}"));
         return Ok(());
     }
-    // Debug builds only: make a USB stick without the window (--test-usb <disk> <iso> <out file>), for testing
+    // Debug builds only: make a USB stick without the window (--test-usb <disk> <iso> <out file> [fat32]), for testing
     if cfg!(debug_assertions) && args.first().map(String::as_str) == Some("--test-usb") && args.len() >= 4 {
         let o = usb::Options {
             disk: args[1].parse().unwrap_or(u32::MAX),
             iso: args[2].clone().into(),
             gpt: true,
-            label: "WIN11 TEST".into(),
+            label: usb::iso_label(std::path::Path::new(&args[2])).unwrap_or_else(|| "WIN11 TEST".into()),
             bypass_hw: true,
             bypass_msa: true,
             local_user: "user".into(),
-            regional: true,
+            region: Some(usb::this_pc()),
+            ntfs: args.get(4).is_none_or(|a| a != "fat32"),
             no_privacy: true,
             no_bitlocker: true,
         };
@@ -158,5 +172,7 @@ fn main() -> eframe::Result {
         centered: true,
         ..Default::default()
     };
+    // Print Screen in the window of HeMimizer (as administrator Windows does not pass it to the screen capture)
+    printscreen::watch();
     eframe::run_native("HeMimizer", options, Box::new(move |cc| Ok(Box::new(app::HeMimizerApp::new(cc, mode)))))
 }

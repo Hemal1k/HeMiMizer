@@ -455,3 +455,21 @@ pub fn settings_changed() {
 pub fn remove_file(p: impl AsRef<Path>) {
     let _ = std::fs::remove_file(p);
 }
+
+/// HeMimizer runs as administrator (its token is elevated).
+pub fn elevated() -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+        let mut e = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut size = 0u32;
+        let ok = GetTokenInformation(token, TokenElevation, (&mut e as *mut TOKEN_ELEVATION).cast(), size_of::<TOKEN_ELEVATION>() as u32, &mut size) != 0;
+        CloseHandle(token);
+        ok && e.TokenIsElevated != 0
+    }
+}

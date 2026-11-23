@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 mod usb_page;
 #[path = "iso_page.rs"]
 mod iso_page;
+#[path = "dl_page.rs"]
+mod dl_page;
 
 const REPO: &str = "https://github.com/Hemal1k/HeMimizer";
 const RESTART_DELAY: u64 = 20;
@@ -47,6 +49,8 @@ enum Phase {
     Usb,
     /// "Make a smaller Windows".
     Iso,
+    /// "Download Windows".
+    Download,
     /// A backup protected with a password: the password first.
     Unlock,
     /// The first page: back up this PC (before a reinstall) or set it up (after one).
@@ -108,6 +112,13 @@ enum Action {
     UsbRefresh,
     UsbBrowse,
     UsbMake,
+    UsbAsk,
+    UsbCancel,
+    DlOpen,
+    DlBrowse,
+    DlStart,
+    DlToUsb(String),
+    DlToIso(String),
     IsoOpen,
     IsoBrowse,
     IsoDrivers,
@@ -192,6 +203,8 @@ pub struct HeMimizerApp {
     usb: usb_page::UsbUi,
     /// the page "Make a smaller Windows"
     iso: iso_page::IsoUi,
+    /// the page "Download Windows"
+    dl: dl_page::DlUi,
     backup_on: Vec<bool>,
     backup_done: Vec<Option<Result<String, String>>>,
     backup_now: Option<usize>,
@@ -298,6 +311,7 @@ impl HeMimizerApp {
             has_wifi: config::has_wifi(),
             usb: usb_page::UsbUi::new(),
             iso: iso_page::IsoUi::new(),
+            dl: dl_page::DlUi::new(),
             backup_now: None,
             backup_log: String::new(),
             btx,
@@ -430,7 +444,7 @@ impl HeMimizerApp {
         ui.horizontal(|ui| {
             ui.set_min_height(40.0);
             // back to the first page from the backup and from the start of the setup
-            let back_to_choose = !self.about && ((matches!(self.phase, Phase::BackedUp | Phase::Start | Phase::Wizard(_)) && self.fresh) || (self.phase == Phase::Usb && !self.usb.running()) || (self.phase == Phase::Iso && !self.iso.running()));
+            let back_to_choose = !self.about && ((matches!(self.phase, Phase::BackedUp | Phase::Start | Phase::Wizard(_)) && self.fresh) || (self.phase == Phase::Usb && !self.usb.running()) || (self.phase == Phase::Iso && !self.iso.running()) || (self.phase == Phase::Download && !self.dl.running()));
             if self.about || back_to_choose {
                 if Btn::new("").icon(glyph::BACK).subtle().show(ui, &p).clicked() {
                     acts.push(match self.phase {
@@ -452,6 +466,7 @@ impl HeMimizerApp {
                     Phase::Unlock => "Protected backup",
                     Phase::Usb => "Windows USB stick",
                     Phase::Iso => "A smaller Windows",
+                    Phase::Download => "Download Windows",
                     _ => "HeMimizer",
                 }
             };
@@ -598,6 +613,15 @@ impl HeMimizerApp {
             "Make a smaller Windows",
             "A lighter Windows 11 ISO like Tiny11: without ads, Teams, Xbox, OneDrive… – the simple choice, or choose yourself what goes and what stays.",
             Action::IsoOpen,
+            acts,
+        );
+        ui.add_space(6.0);
+        big(
+            ui,
+            glyph::DOWNLOAD,
+            "Download Windows",
+            "The ISO of Windows 11 or 10 in your language, straight from Microsoft's servers.",
+            Action::DlOpen,
             acts,
         );
     }
@@ -1923,20 +1947,19 @@ impl HeMimizerApp {
                 acts.push(Action::OpenLog);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| match self.phase {
+                Phase::Download => {
+                    if Btn::new("Download").icon(glyph::DOWNLOAD).accent().enabled(self.dl.ready()).show(ui, &p).clicked() {
+                        acts.push(Action::DlStart);
+                    }
+                }
                 Phase::Iso => {
                     if Btn::new("Make the ISO").icon(glyph::DISC).accent().enabled(self.iso.ready()).show(ui, &p).clicked() {
                         acts.push(Action::IsoMake);
                     }
-                    if !self.iso.running() && Btn::new(tr("Close", "Zavřít")).show(ui, &p).clicked() {
-                        acts.push(Action::Quit);
-                    }
                 }
                 Phase::Usb => {
                     if Btn::new("Make the stick").icon(glyph::USB).accent().enabled(self.usb.ready()).show(ui, &p).clicked() {
-                        acts.push(Action::UsbMake);
-                    }
-                    if !self.usb.running() && Btn::new(tr("Close", "Zavřít")).show(ui, &p).clicked() {
-                        acts.push(Action::Quit);
+                        acts.push(Action::UsbAsk);
                     }
                 }
                 Phase::Unlock => {
@@ -2244,9 +2267,30 @@ impl HeMimizerApp {
                         self.usb.disk = Some(self.usb.disks[0].number);
                     }
                 }
+                Action::UsbAsk => self.usb.asking = true,
+                Action::UsbCancel => self.usb.asking = false,
+                Action::DlOpen => self.phase = Phase::Download,
+                Action::DlBrowse => {
+                    if let Some(d) = rfd::FileDialog::new().set_title("Save the ISO to").pick_folder() {
+                        self.dl.folder = d.display().to_string();
+                    }
+                }
+                Action::DlStart => self.dl.start(ctx),
+                Action::DlToUsb(iso) => {
+                    self.usb.iso = iso;
+                    self.phase = Phase::Usb;
+                    self.usb.disks = crate::usb::disks();
+                    if self.usb.disks.len() == 1 {
+                        self.usb.disk = Some(self.usb.disks[0].number);
+                    }
+                }
+                Action::DlToIso(iso) => {
+                    self.iso.iso = iso;
+                    self.phase = Phase::Iso;
+                }
                 Action::UsbRefresh => {
                     self.usb.disks = crate::usb::disks();
-                    self.usb.sure = false;
+                    self.usb.asking = false;
                 }
                 Action::UsbBrowse => {
                     if let Some(f) = rfd::FileDialog::new().set_title("Windows ISO").add_filter("ISO", &["iso"]).pick_file() {
@@ -2256,7 +2300,7 @@ impl HeMimizerApp {
                 Action::UsbMake => {
                     let o = self.usb.options();
                     *self.usb.state.lock().unwrap() = Some(("Starting".into(), None));
-                    self.usb.sure = false;
+                    self.usb.asking = false;
                     let (state, ctx) = (self.usb.state.clone(), ctx.clone());
                     std::thread::spawn(move || {
                         let log = |t: String| {
@@ -2391,6 +2435,11 @@ fn pick_exe(current: &str) -> Option<String> {
 }
 
 impl eframe::App for HeMimizerApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // a download of Windows that runs ends with the window
+        crate::msiso::stop();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll();
@@ -2449,6 +2498,7 @@ impl eframe::App for HeMimizerApp {
                 Phase::Choose | Phase::Unlock => 0,
                 Phase::Usb => 5,
                 Phase::Iso => 6,
+                Phase::Download => 7,
                 Phase::BackingUp | Phase::BackedUp => 1,
                 Phase::Start => 2,
                 Phase::Running => 3,
@@ -2461,6 +2511,7 @@ impl eframe::App for HeMimizerApp {
                     Phase::Unlock => self.unlock_page(ui, &mut acts),
                     Phase::Usb => self.usb_page(ui, &mut acts),
                     Phase::Iso => self.iso_page(ui, &mut acts),
+                    Phase::Download => self.dl_page(ui, &mut acts),
                     Phase::Wizard(page) => self.wizard_page(ui, page, &mut acts),
                     Phase::BackingUp | Phase::BackedUp => self.backup_page(ui, &mut acts),
                     Phase::Start => self.start_page(ui, &mut acts),
