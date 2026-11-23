@@ -24,6 +24,7 @@ mod i18n;
 mod install;
 mod plan;
 mod printscreen;
+mod selfupdate;
 mod programs;
 mod steps;
 mod shortcuts;
@@ -157,6 +158,8 @@ fn main() -> eframe::Result {
         steps::remove_myself();
         return Ok(());
     }
+    // the exe the last own update replaced
+    selfupdate::remove_old();
     let mode = if args.iter().any(|a| a == "--resume") && !steps::pending_resume().is_empty() { app::Mode::Resume } else { app::Mode::Normal };
 
     let icon = egui::IconData { rgba: include_bytes!("../assets/HeMiMizer-64.rgba").to_vec(), width: 64, height: 64 };

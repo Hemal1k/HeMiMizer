@@ -9,6 +9,8 @@ pub struct Look {
     pub theme: u8,
     /// 0 as Windows, 1 English, 2 Czech.
     pub language: u8,
+    /// The own updates switched off (Settings → Updates): no question to GitHub at the start.
+    pub no_updates: bool,
 }
 
 fn file() -> Option<PathBuf> {
@@ -23,6 +25,7 @@ impl Look {
             match line.split_once('=') {
                 Some(("Theme", v)) => l.theme = v.trim().parse::<u8>().unwrap_or(0).min(2),
                 Some(("Language", v)) => l.language = v.trim().parse::<u8>().unwrap_or(0).min(2),
+                Some(("Updates", v)) => l.no_updates = v.trim() == "0",
                 _ => {}
             }
         }
@@ -34,7 +37,7 @@ impl Look {
             if let Some(dir) = f.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            let _ = std::fs::write(f, format!("Theme={}\nLanguage={}\n", self.theme, self.language));
+            let _ = std::fs::write(f, format!("Theme={}\nLanguage={}\nUpdates={}\n", self.theme, self.language, if self.no_updates { 0 } else { 1 }));
         }
     }
 }

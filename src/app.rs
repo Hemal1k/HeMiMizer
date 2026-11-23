@@ -127,6 +127,10 @@ enum Action {
     Quit,
     AskReboot,
     About(bool),
+    /// the own updates on / off (Settings → Updates)
+    SetUpdates(bool),
+    /// the newer version downloaded and started in place of this one
+    SelfUpdate,
     Open(String),
     OpenLicences,
     OpenLog,
@@ -205,6 +209,8 @@ pub struct HeMiMizerApp {
     iso: iso_page::IsoUi,
     /// the page "Download Windows"
     dl: dl_page::DlUi,
+    /// a newer HeMiMizer on GitHub (asked at the start, unless switched off or HeMi Launcher keeps it up to date)
+    upd: crate::selfupdate::Shared,
     backup_on: Vec<bool>,
     backup_done: Vec<Option<Result<String, String>>>,
     backup_now: Option<usize>,
@@ -312,6 +318,7 @@ impl HeMiMizerApp {
             usb: usb_page::UsbUi::new(),
             iso: iso_page::IsoUi::new(),
             dl: dl_page::DlUi::new(),
+            upd: crate::selfupdate::new(),
             backup_now: None,
             backup_log: String::new(),
             btx,
@@ -340,6 +347,10 @@ impl HeMiMizerApp {
         }
         if mode == Mode::Resume {
             app.start(&cc.egui_ctx);
+        } else if !app.look.no_updates && !crate::selfupdate::launcher_present() {
+            // a newer HeMiMizer, offered on the first page (never while it works after a restart)
+            let c = cc.egui_ctx.clone();
+            crate::selfupdate::check(app.upd.clone(), move || c.request_repaint());
         }
         app
     }
@@ -504,6 +515,22 @@ impl HeMiMizerApp {
             });
         });
         ui.add_space(14.0);
+        section(ui, &p, "Updates");
+        card(ui, &p, |ui| {
+            row_layout(ui, 52.0, |ui| {
+                if crate::selfupdate::launcher_present() {
+                    crate::widgets::two_lines(ui, &p, "Updates", "HeMi Launcher keeps HeMiMizer up to date.");
+                } else {
+                    crate::widgets::two_lines(ui, &p, "Look for a new version at the start", "Asks GitHub for the newest release and offers it on the first page.");
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if crate::widgets::toggle(ui, &p, !self.look.no_updates).clicked() {
+                            acts.push(Action::SetUpdates(self.look.no_updates));
+                        }
+                    });
+                }
+            });
+        });
+        ui.add_space(14.0);
         section(ui, &p, "About");
         let value = |ui: &mut egui::Ui, label: &str, value: &str| {
             card(ui, &p, |ui| {
@@ -541,9 +568,47 @@ impl HeMiMizerApp {
         browse
     }
 
+    /// A newer HeMiMizer: offered on top of the first page, with the progress of its download.
+    fn update_bar(&self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        let p = self.p;
+        let state = self.upd.lock().unwrap().clone();
+        if state == crate::selfupdate::State::None {
+            return;
+        }
+        card(ui, &p, |ui| {
+            row_layout(ui, 48.0, |ui| {
+                ui.label(RichText::new(glyph::DOWNLOAD.to_string()).font(theme::icon(20.0)).color(p.accent_text));
+                ui.add_space(12.0);
+                match &state {
+                    crate::selfupdate::State::Available { version, .. } => {
+                        crate::widgets::two_lines(ui, &p, &format!("HeMiMizer {version} is out"), "Downloaded from GitHub, checked and started in place of this one.");
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if Btn::new("Update").accent().show(ui, &p).clicked() {
+                                acts.push(Action::SelfUpdate);
+                            }
+                        });
+                    }
+                    crate::selfupdate::State::Downloading(done, total) => {
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new("Downloading the new HeMiMizer…").size(14.0).color(p.text));
+                            let f = if *total > 0 { *done as f32 / *total as f32 } else { 0.0 };
+                            ui.add(egui::ProgressBar::new(f).desired_height(6.0).fill(p.accent).corner_radius(3));
+                        });
+                    }
+                    crate::selfupdate::State::Failed(e) => {
+                        crate::widgets::two_lines(ui, &p, "The update did not work", e);
+                    }
+                    crate::selfupdate::State::None => {}
+                }
+            });
+        });
+        ui.add_space(10.0);
+    }
+
     /// The first page: before a reinstall (backup) or after it (setup).
     fn choose_page(&self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
+        self.update_bar(ui, acts);
         let big = |ui: &mut egui::Ui, g: char, title: &str, detail: &str, go: Action, acts: &mut Vec<Action>| {
             let resp = egui::Frame::new()
                 .fill(p.card)
@@ -2356,6 +2421,19 @@ impl HeMiMizerApp {
                 Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
                 Action::AskReboot => self.dialog = Some(Dialog::Reboot),
                 Action::About(on) => self.about = on,
+                Action::SetUpdates(on) => {
+                    self.look.no_updates = !on;
+                    self.look.save();
+                    if on {
+                        let c = ctx.clone();
+                        crate::selfupdate::check(self.upd.clone(), move || c.request_repaint());
+                    }
+                }
+                Action::SelfUpdate => {
+                    let c = ctx.clone();
+                    let q = ctx.clone();
+                    crate::selfupdate::update(self.upd.clone(), move || c.request_repaint(), move || q.send_viewport_cmd(egui::ViewportCommand::Close));
+                }
                 Action::Open(t) => sys::shell_open(&t),
                 Action::OpenLog => {
                     let log = sys::log_path();
