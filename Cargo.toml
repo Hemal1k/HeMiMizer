@@ -1,6 +1,6 @@
 [package]
 name = "hemimizer"
-version = "1.4.0"
+version = "1.4.1"
 edition = "2024"
 description = "HeMiMizer - gets a freshly installed Windows ready"
 authors = ["Richard Hemala"]
