@@ -43,7 +43,8 @@ and Done removes HeMimizer from the PC – it writes no log, nothing of it stays
 
 | Tool | What it does |
 |---|---|
-| Make a Windows USB stick | From a Windows 10 / 11 ISO, like Rufus: GPT (UEFI) or MBR (BIOS or UEFI), FAT32 with a split install.wim, and your choices for the installation – no TPM 2.0 / Secure Boot / RAM check, no Microsoft account required, a local account, the regional settings of this PC, no privacy questions, no automatic BitLocker. |
+| Download Windows | The ISO of Windows 11 or 10 in the language you choose, straight from Microsoft's servers, with its progress – then a USB stick or a smaller Windows from it in one click. |
+| Make a Windows USB stick | From a Windows 10 / 11 ISO, like Rufus: GPT (UEFI) or MBR (BIOS or UEFI), NTFS (a small FAT32 boot partition and an NTFS one – images of any size) or FAT32 with a split install.wim, the name from the ISO, and your choices for the installation – no TPM 2.0 / Secure Boot / RAM check, no Microsoft account required, a local account, the region and time zone you pick, no privacy questions, no automatic BitLocker. |
 | Make a smaller Windows | A lighter Windows 11 ISO in the spirit of Tiny11, by HeMimizer's own list: one edition, without ads, Teams, Clipchamp, Xbox, OneDrive and other extras, no TPM check, no Microsoft account needed – the simple choice, or choose yourself what goes and what stays; drivers and HeMimizer can be added. |
 
 Programs with their own licence terms are listed at the setup, each with a link: HeMimizer installs them only after you
@@ -74,7 +75,7 @@ Rust (stable, MSVC). `cargo build --release` gives `build\release\HeMimizer.exe`
 | `src\backup.rs`, `src\config.rs`, `src\appdata.rs` | The backup: settings, installers, own folders, the settings of programs. |
 | `src\crypto.rs` | The backup with a password (AES-256-GCM, PBKDF2-SHA256). |
 | `src\shortcuts.rs` | Desktop, Start, taskbar and the start with Windows of the new programs. |
-| `src\usb.rs`, `src\iso.rs` | The tools: a Windows USB stick, a smaller Windows ISO. |
+| `src\usb.rs`, `src\iso.rs`, `src\msiso.rs` | The tools: a Windows USB stick, a smaller Windows ISO, the download of Windows from Microsoft. |
 
 ## License
 
