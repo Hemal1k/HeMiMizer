@@ -1,6 +1,6 @@
 //! The page "Make a Windows USB stick" of the window (the work is in usb.rs).
 
-use super::{Action, HeMimizerApp};
+use super::{Action, HeMiMizerApp};
 use crate::theme::glyph;
 use crate::usb::{self, Region, UsbDisk};
 use crate::widgets::{Btn, Tone, card, info_bar, row_layout, section};
@@ -101,7 +101,7 @@ impl UsbUi {
     }
 }
 
-impl HeMimizerApp {
+impl HeMiMizerApp {
     pub(super) fn usb_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
         let state = self.usb.state.lock().unwrap().clone();

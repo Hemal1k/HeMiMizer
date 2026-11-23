@@ -1,6 +1,6 @@
-//! Print Screen in the window of HeMimizer. HeMimizer runs as administrator, and Windows does not pass the keys of a
-//! window with higher rights to the screen capture of the user (Snipping Tool) – Print Screen did nothing while HeMimizer
-//! was in front (the user, 2026-11-23). A keyboard hook of HeMimizer sees the key then and opens the screen capture
+//! Print Screen in the window of HeMiMizer. HeMiMizer runs as administrator, and Windows does not pass the keys of a
+//! window with higher rights to the screen capture of the user (Snipping Tool) – Print Screen did nothing while HeMiMizer
+//! was in front (the user, 2026-11-23). A keyboard hook of HeMiMizer sees the key then and opens the screen capture
 //! itself, as the user (through File Explorer). The key goes on to Windows unchanged; nothing happens while another app is
 //! in front (Windows does it there), nor when "Use the Print screen key to open screen capture" is off.
 
@@ -14,7 +14,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 const VK_SNAPSHOT: u32 = 0x2C;
 static STARTED: AtomicBool = AtomicBool::new(false);
 
-/// Watches Print Screen while HeMimizer runs (only when it runs as administrator – else Windows does it itself).
+/// Watches Print Screen while HeMiMizer runs (only when it runs as administrator – else Windows does it itself).
 pub fn watch() {
     if STARTED.swap(true, Ordering::SeqCst) || !crate::sys::elevated() || !snipping_on() {
         return;

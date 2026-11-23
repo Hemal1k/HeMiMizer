@@ -1,4 +1,4 @@
-//! The settings HeMimizer applies: what "Back up this PC" wrote to the folder `config` next to the exe (nothing is
+//! The settings HeMiMizer applies: what "Back up this PC" wrote to the folder `config` next to the exe (nothing is
 //! built in). {PROFILE} in the files stands for the profile folder.
 
 use crate::i18n::tr;
@@ -51,25 +51,25 @@ pub fn steam_libraries() -> Vec<String> {
     text("steam-libraries.txt", false).lines().map(|l| l.split('#').next().unwrap_or("").trim().to_string()).filter(|l| !l.is_empty()).collect()
 }
 
-/// `config` next to HeMimizer.exe.
-/// The folder of HeMimizer.exe.
+/// `config` next to HeMiMizer.exe.
+/// The folder of HeMiMizer.exe.
 pub fn exe_dir() -> PathBuf {
     std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)).unwrap_or_default()
 }
 
-/// Everything HeMimizer keeps next to its exe, in one folder (the user, 2026-11-15): config, installers, the log and the
+/// Everything HeMiMizer keeps next to its exe, in one folder (the user, 2026-11-15): config, installers, the log and the
 /// to-do file.
-pub const HOME: &str = "HeMimizer data";
+pub const HOME: &str = "HeMiMizer data";
 
-/// The folder the backup goes to when the user chose another one than the folder of HeMimizer.exe (a USB stick, the
-/// NAS…); HeMimizer.exe is copied there too, so the setup runs from it later.
+/// The folder the backup goes to when the user chose another one than the folder of HeMiMizer.exe (a USB stick, the
+/// NAS…); HeMiMizer.exe is copied there too, so the setup runs from it later.
 static SAVE_TO: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
 pub fn set_save_to(folder: Option<PathBuf>) {
     *SAVE_TO.lock().unwrap() = folder;
 }
 
-/// The folder of the backup chosen (else the folder of HeMimizer.exe).
+/// The folder of the backup chosen (else the folder of HeMiMizer.exe).
 pub fn save_to() -> PathBuf {
     SAVE_TO.lock().unwrap().clone().unwrap_or_else(exe_dir)
 }
@@ -82,10 +82,10 @@ pub fn dir() -> PathBuf {
     home().join("config")
 }
 
-/// The folders and the log of older versions (config, installers, HeMimizer.log right next to the exe) go into the folder.
+/// The folders and the log of older versions (config, installers, HeMiMizer.log right next to the exe) go into the folder.
 pub fn tidy_up() {
     let (exe, home) = (exe_dir(), home());
-    for name in ["config", "installers", "HeMimizer.log"] {
+    for name in ["config", "installers", "HeMiMizer.log"] {
         let (old, new) = (exe.join(name), home.join(name));
         if old.exists() && !new.exists() {
             let _ = std::fs::create_dir_all(&home);
@@ -465,7 +465,7 @@ fn cap_mouse() -> Result<String, String> {
 
 /// `reg export` of a key as text.
 fn reg_export(key: &str) -> Result<String, String> {
-    let f = std::env::temp_dir().join(format!("HeMimizer-export-{}.reg", std::process::id()));
+    let f = std::env::temp_dir().join(format!("HeMiMizer-export-{}.reg", std::process::id()));
     sys::run("reg.exe", &["export", key, &f.display().to_string(), "/y"])?;
     let raw = std::fs::read(&f).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&f);
@@ -642,7 +642,7 @@ fn cap_steam() -> Result<String, String> {
     Ok(format!("{n}"))
 }
 
-/// Get-MpPreference (the exclusions only when HeMimizer runs as administrator – the release always does),
+/// Get-MpPreference (the exclusions only when HeMiMizer runs as administrator – the release always does),
 /// and whether memory integrity (Core isolation) is on.
 fn cap_defender() -> Result<String, String> {
     let names = DEFENDER_SETTINGS.join(",");
@@ -670,7 +670,7 @@ fn cap_hemidock() -> Result<String, String> {
     if !data.join("settings.json").exists() {
         return Err(tr("HeMiDock has no settings here.", "HeMiDock tu nemá nastavení.").into());
     }
-    let stage = std::env::temp_dir().join(format!("HeMimizer-hemidock-{}", std::process::id()));
+    let stage = std::env::temp_dir().join(format!("HeMiMizer-hemidock-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&stage);
     std::fs::create_dir_all(stage.join("Pinned")).map_err(|e| e.to_string())?;
     let mut n = 0;
@@ -698,7 +698,7 @@ fn cap_hemidock() -> Result<String, String> {
 
 /// The pins of Start (start2.bin) and of the taskbar (its shortcuts + the order in Taskband) into pins.tar.
 fn cap_pins() -> Result<String, String> {
-    let stage = std::env::temp_dir().join(format!("HeMimizer-pins-{}", std::process::id()));
+    let stage = std::env::temp_dir().join(format!("HeMiMizer-pins-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&stage);
     std::fs::create_dir_all(stage.join("taskbar")).map_err(|e| e.to_string())?;
     std::fs::copy(start_bin_dir().join("start2.bin"), stage.join("start2.bin")).map_err(|e| format!("start2.bin: {e}"))?;

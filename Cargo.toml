@@ -2,11 +2,11 @@
 name = "hemimizer"
 version = "1.4.0"
 edition = "2024"
-description = "HeMimizer - gets a freshly installed Windows ready"
+description = "HeMiMizer - gets a freshly installed Windows ready"
 authors = ["Richard Hemala"]
 
 [[bin]]
-name = "HeMimizer"
+name = "HeMiMizer"
 path = "src/main.rs"
 
 [dependencies]

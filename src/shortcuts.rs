@@ -73,7 +73,7 @@ fn user_start_menu() -> PathBuf {
 
 /// The layout with the taskbar pins (it must stay: Windows reads it at every sign-in).
 fn layout_file() -> PathBuf {
-    PathBuf::from(sys::env("ProgramData", r"C:\ProgramData")).join(r"HeMimizer\taskbar.xml")
+    PathBuf::from(sys::env("ProgramData", r"C:\ProgramData")).join(r"HeMiMizer\taskbar.xml")
 }
 
 fn xml_escape(s: &str) -> String {
@@ -161,7 +161,7 @@ pub fn run(c: &Ctx) -> Res {
             Ok(()) => {
                 let _ = sys::exec("taskkill.exe", &["/f", "/im", "explorer.exe"]);
                 std::thread::sleep(std::time::Duration::from_secs(10));
-                // the pins are the taskbar's own now: the policy and its file go (nothing of HeMimizer stays)
+                // the pins are the taskbar's own now: the policy and its file go (nothing of HeMiMizer stays)
                 let pol = r"Software\Policies\Microsoft\Windows\Explorer";
                 sys::delete_values(Root::Hkcu, pol, &["StartLayoutFile", "LockedStartLayout"]);
                 let _ = std::fs::remove_dir_all(f.parent().unwrap_or(&f));

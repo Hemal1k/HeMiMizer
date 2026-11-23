@@ -1,11 +1,11 @@
-HeMimizer – third-party notices
+HeMiMizer – third-party notices
 ==============================
 
-HeMimizer is written in Rust and uses the following libraries (crates.io). All of them are under free licences
+HeMiMizer is written in Rust and uses the following libraries (crates.io). All of them are under free licences
 (mostly MIT or Apache-2.0); the full licence texts are on https://crates.io and in the repository of each library.
-Where a library offers a choice of licences ("A OR B"), HeMimizer uses it under the MIT licence where offered.
+Where a library offers a choice of licences ("A OR B"), HeMiMizer uses it under the MIT licence where offered.
 
-HeMimizer does not ship the fonts Segoe UI Variable and Segoe Fluent Icons – it loads them from Windows
+HeMiMizer does not ship the fonts Segoe UI Variable and Segoe Fluent Icons – it loads them from Windows
 (C:\Windows\Fonts). The default fonts of egui (epaint_default_fonts) are under OFL-1.1 and the Ubuntu Font Licence 1.0.
 
 Library                                Licence

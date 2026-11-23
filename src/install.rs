@@ -24,7 +24,7 @@ pub fn not_chosen() -> String {
     "Not chosen in the wizard".into()
 }
 
-/// Installers for one user that refuse administrator rights or ask for them again (HeMimizer has them; Discord asked
+/// Installers for one user that refuse administrator rights or ask for them again (HeMiMizer has them; Discord asked
 /// for an administrator during its installation, 2026-11-18): run as the signed-in user.
 const AS_USER: &[&str] = &["spotify", "discord"];
 
@@ -69,7 +69,7 @@ pub fn winget_ready(c: &Ctx) -> Result<(), String> {
             return Ok(());
         }
     }
-    Err("winget is missing – install \"App Installer\" from the Microsoft Store and run HeMimizer again".into())
+    Err("winget is missing – install \"App Installer\" from the Microsoft Store and run HeMiMizer again".into())
 }
 
 /// winget's exit codes that mean "it is there": already installed, no newer version.
@@ -102,7 +102,7 @@ fn last_line(text: &str) -> String {
 /// Runs a program as the signed-in user without administrator rights (a scheduled task with the limited token)
 /// and waits for it; its output is not known, only that it ended.
 fn as_user(exe: &str, args: &[&str]) -> Result<sys::Output, String> {
-    const TASK: &str = "HeMimizer-as-user";
+    const TASK: &str = "HeMiMizer-as-user";
     let line = std::iter::once(format!("\"{exe}\"")).chain(args.iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.to_string() })).collect::<Vec<_>>().join(" ");
     // the task of this user (the one signed in) with the limited token: the installer runs without administrator rights
     sys::run("schtasks.exe", &["/create", "/tn", TASK, "/tr", &line, "/sc", "once", "/st", "00:00", "/rl", "LIMITED", "/f"])?;
@@ -220,7 +220,7 @@ fn install_offline(c: &Ctx, item: &Item) -> Result<bool, String> {
                 return Ok(false);
             }
             let mut a = split(s);
-            // the HeMi apps for all users (HeMimizer runs as administrator)
+            // the HeMi apps for all users (HeMiMizer runs as administrator)
             if matches!(item.source, Source::GitHub(..)) {
                 a.push("/ALLUSERS".into());
             }

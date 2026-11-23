@@ -21,7 +21,7 @@ pub struct Hardware {
 
 static FOUND: OnceLock<Hardware> = OnceLock::new();
 
-/// Starts finding out (at the start of HeMimizer).
+/// Starts finding out (at the start of HeMiMizer).
 pub fn detect_in_background() {
     std::thread::spawn(|| {
         let _ = get();

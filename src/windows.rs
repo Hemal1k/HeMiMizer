@@ -103,13 +103,13 @@ pub fn explorer(_c: &Ctx) -> Res {
 
 // ---------------------------------------------------------------- updates, Game Bar, sign-in
 
-/// The settings of Windows Update, then every update that is not a driver (drivers come only from HeMimizer –
+/// The settings of Windows Update, then every update that is not a driver (drivers come only from HeMiMizer –
 /// the step "No drivers from Windows Update" runs before and the search asks for software only).
 pub fn windows_update(c: &Ctx) -> Res {
     // updates for other Microsoft products: on
     sys::set_dword(Root::Hklm, r"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings", "AllowMUUpdateService", 1)?;
     sys::ps(
-        "$sm=New-Object -ComObject Microsoft.Update.ServiceManager; $sm.ClientApplicationID='HeMimizer'; \
+        "$sm=New-Object -ComObject Microsoft.Update.ServiceManager; $sm.ClientApplicationID='HeMiMizer'; \
          $null=$sm.AddService2('7971f918-a847-4430-9279-4a52d1efe18d',7,'')",
     )?;
     // Delivery Optimization (downloads from other PCs): off
@@ -118,7 +118,7 @@ pub fn windows_update(c: &Ctx) -> Res {
     c.log(tr("Looking for updates", "Hledám aktualizace"));
     let out = sys::ps(
         r#"
-$s = New-Object -ComObject Microsoft.Update.Session; $s.ClientApplicationID = 'HeMimizer'
+$s = New-Object -ComObject Microsoft.Update.Session; $s.ClientApplicationID = 'HeMiMizer'
 $found = $s.CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'").Updates
 $list = New-Object -ComObject Microsoft.Update.UpdateColl
 foreach ($u in $found) { if (-not $u.EulaAccepted) { $u.AcceptEula() }; [void]$list.Add($u) }
@@ -252,16 +252,16 @@ pub fn defender(c: &Ctx) -> Res {
     ))
 }
 
-/// A Defender exclusion for HeMimizer itself while it works (the user's wish): its folder, its work folders and
+/// A Defender exclusion for HeMiMizer itself while it works (the user's wish): its folder, its work folders and
 /// its process. Defender's machine learning stopped it in the middle of a run (Trojan:Win32/Bearfoos.A!ml) and
 /// left Windows half set up. Removed again at the end of the run (kept while a restart is pending).
 pub fn self_exclusion(on: bool) {
     let exe = std::env::current_exe().map(|e| e.display().to_string()).unwrap_or_default();
-    let mut paths = vec![sys::work_dir().display().to_string(), std::env::temp_dir().join("HeMimizer").display().to_string()];
+    let mut paths = vec![sys::work_dir().display().to_string(), std::env::temp_dir().join("HeMiMizer").display().to_string()];
     if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.display().to_string())) {
         paths.push(d);
     }
-    paths.push(std::path::PathBuf::from(sys::env("LOCALAPPDATA", "")).join(r"HeMimizer\app").display().to_string());
+    paths.push(std::path::PathBuf::from(sys::env("LOCALAPPDATA", "")).join(r"HeMiMizer\app").display().to_string());
     let list = paths.iter().map(|p| format!("'{}'", p.replace('\'', "''"))).collect::<Vec<_>>().join(",");
     let verb = if on { "Add" } else { "Remove" };
     let _ = sys::ps(&format!(
@@ -273,7 +273,7 @@ pub fn self_exclusion(on: bool) {
 
 // ---------------------------------------------------------------- Microsoft Store
 
-/// Asks Microsoft Store to look for updates of its apps and download them – in the background, HeMimizer does not
+/// Asks Microsoft Store to look for updates of its apps and download them – in the background, HeMiMizer does not
 /// wait for it. Through the MDM bridge (as "Get updates" in the Store); winget is the fallback.
 pub fn store_updates(c: &Ctx) -> Res {
     let has_store = sys::ps("@(Get-AppxPackage -Name Microsoft.WindowsStore).Count").is_ok_and(|n| n.trim() != "0");
@@ -453,7 +453,7 @@ Delete-DeliveryOptimizationCache -Force -ErrorAction SilentlyContinue
     sys::run("dism.exe", &["/online", "/cleanup-image", "/startcomponentcleanup", "/quiet"])?;
 
     // Disk Clean-up with every item ticked (incl. the system files): each handler under VolumeCaches gets the
-    // flag of the set 99, which cleanmgr /sagerun:99 then runs on every drive (HeMimizer runs as administrator)
+    // flag of the set 99, which cleanmgr /sagerun:99 then runs on every drive (HeMiMizer runs as administrator)
     c.log(tr("Disk Clean-up with all items (can take long)", "Vyčištění disku se všemi položkami (může trvat dlouho)"));
     sys::ps(
         "Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VolumeCaches' | \

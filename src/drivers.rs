@@ -47,7 +47,7 @@ fn not_found(what: &str) -> String {
     format!("AMD {what}: {}", tr("the download link was not found on amd.com", "odkaz ke stažení nebyl na amd.com nalezen"))
 }
 
-// ---------------------------------------------------------------- installers next to HeMimizer.exe (offline)
+// ---------------------------------------------------------------- installers next to HeMiMizer.exe (offline)
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind {
@@ -69,7 +69,7 @@ fn version_after(name: &str, after: &str) -> Option<String> {
     (!v.is_empty()).then_some(v)
 }
 
-/// The AMD installers lying next to HeMimizer.exe, whatever their names: told apart by the product name written
+/// The AMD installers lying next to HeMiMizer.exe, whatever their names: told apart by the product name written
 /// in the file ("AMD Chipset Software" / "AMD Software: Adrenalin Edition"), the file name only as a fallback.
 /// The small web installer of Adrenalin (minimal setup) needs the internet, so it is not taken.
 pub fn local_installers() -> Vec<Local> {
@@ -191,7 +191,7 @@ pub fn internet(c: &Ctx) -> Res {
 
 // ---------------------------------------------------------------- the drivers
 
-/// The step says it, the end of the run lists it, and HeMimizer goes on (nothing is downloaded).
+/// The step says it, the end of the run lists it, and HeMiMizer goes on (nothing is downloaded).
 fn not_next_to_exe(c: &Ctx, what: &str) -> Res {
     let dir = crate::config::dir().parent().map(|d| d.display().to_string()).unwrap_or_default();
     // c.note writes it to the log too
@@ -284,7 +284,7 @@ pub fn gpu_settings(c: &Ctx) -> Res {
         return Ok(tr("Graphics settings applied", "Nastavení grafiky použito").into());
     }
     // Adrenalin has no way to import a tuning profile from outside – it is saved for Import in Adrenalin
-    let dir: PathBuf = sys::documents().join("HeMimizer");
+    let dir: PathBuf = sys::documents().join("HeMiMizer");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let oc = dir.join("OC.xml");
     std::fs::write(&oc, config::bytes("OC.xml")).map_err(|e| e.to_string())?;

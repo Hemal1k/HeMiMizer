@@ -21,9 +21,9 @@ const ROUNDS: u32 = 600_000;
 const CHUNK: usize = 1 << 20;
 const LAST: u32 = 0x8000_0000;
 
-/// The encrypted part of the backup, in "HeMimizer data".
+/// The encrypted part of the backup, in "HeMiMizer data".
 pub const SEALED: &str = "sealed.hmz";
-/// What is encrypted (folders in "HeMimizer data").
+/// What is encrypted (folders in "HeMiMizer data").
 const PARTS: &[&str] = &["config", "apps", "folders"];
 
 pub fn sealed_file() -> PathBuf {
@@ -100,9 +100,9 @@ fn decrypt_file(from: &Path, to: &Path, password: &str) -> Result<(), String> {
     let io = |e: std::io::Error| e.to_string();
     let mut r = std::io::BufReader::new(std::fs::File::open(from).map_err(io)?);
     let mut head = [0u8; 32];
-    r.read_exact(&mut head).map_err(|_| "Not a backup of HeMimizer".to_string())?;
+    r.read_exact(&mut head).map_err(|_| "Not a backup of HeMiMizer".to_string())?;
     if &head[..4] != MAGIC {
-        return Err("Not a backup of HeMimizer".into());
+        return Err("Not a backup of HeMiMizer".into());
     }
     let salt = &head[4..20];
     let rounds = u32::from_le_bytes(head[20..24].try_into().unwrap_or_default());
@@ -178,7 +178,7 @@ pub fn seal(password: &str, log: &dyn Fn(String)) -> Result<String, String> {
     Ok(format!("{SEALED} ({:.1} MB) – only with the password", size as f64 / 1e6))
 }
 
-/// Opens a protected backup: its parts back into "HeMimizer data" (sealed.hmz stays).
+/// Opens a protected backup: its parts back into "HeMiMizer data" (sealed.hmz stays).
 pub fn unseal(password: &str) -> Result<(), String> {
     let home = config::home();
     let tar = home.join("sealed.tar");

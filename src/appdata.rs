@@ -3,7 +3,7 @@
 //! installed. Programs that sync their settings through an account (browsers, chat, games) are not listed. VLC,
 //! qBittorrent, Brave and Steam have their own parts in config.rs.
 //!
-//! Besides the programs of the wizard, programs HeMimizer does not install (Adobe, DaVinci Resolve, Blender…) are
+//! Besides the programs of the wizard, programs HeMiMizer does not install (Adobe, DaVinci Resolve, Blender…) are
 //! offered when they are found on this PC (`FOUND`): their settings go back before the user installs them again, and
 //! they find them at their first start.
 
@@ -27,7 +27,7 @@ const fn d(id: &'static str, paths: &'static [&'static str], skip: &'static [&'s
     Data { id, paths, skip, what, name: "" }
 }
 
-/// A program HeMimizer does not install, offered when its settings are on this PC.
+/// A program HeMiMizer does not install, offered when its settings are on this PC.
 const fn f(id: &'static str, name: &'static str, paths: &'static [&'static str], skip: &'static [&'static str], what: &'static str) -> Data {
     Data { id, paths, skip, what, name }
 }
@@ -66,7 +66,7 @@ pub const ALL: &[Data] = &[
     d("nodejs", &[r"{PROFILE}\.npmrc"], &[], "npm settings"),
     d("python", &[r"{APPDATA}\pip"], &[], "pip settings"),
     d("hemilauncher", &[r"{APPDATA}\HeMi\HeMiLauncher"], &[], "Its settings"),
-    // ---------------------------------------------------------------- found on this PC (not installed by HeMimizer)
+    // ---------------------------------------------------------------- found on this PC (not installed by HeMiMizer)
     f("adobe", "Adobe apps", &[r"{APPDATA}\Adobe", r"{DOCUMENTS}\Adobe"], &["Common", "Logs", "CRLogs", "LogTransport2", "OOBE", "Flash Player", "AAMUpdater", "Adobe PCD", "Acrobat"], "Photoshop, Premiere, Illustrator, Lightroom…: settings, presets, workspaces, shortcuts"),
     f("davinci", "DaVinci Resolve", &[r"{APPDATA}\Blackmagic Design\DaVinci Resolve"], &["logs", "Support\\logs"], "Preferences, keyboard, LUTs, Fusion templates and the local projects"),
     f("blender", "Blender", &[r"{APPDATA}\Blender Foundation\Blender"], &[], "Preferences, add-ons and the startup file"),
@@ -89,7 +89,7 @@ pub fn find(id: &str) -> Option<&'static Data> {
     ALL.iter().find(|d| d.id == id && !d.paths.is_empty())
 }
 
-/// The programs of the wizard whose settings HeMimizer cannot take along (they keep them in an account, or nowhere
+/// The programs of the wizard whose settings HeMiMizer cannot take along (they keep them in an account, or nowhere
 /// worth copying).
 pub fn not_covered(apps: &[String]) -> Vec<&'static str> {
     const OWN_PARTS: &[&str] = &["vlc", "qbittorrent", "brave", "steam", "amd-gpu"];

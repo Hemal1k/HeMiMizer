@@ -151,7 +151,7 @@ fn ps_quote(s: &str) -> String {
 
 /// The hidden folder the ISO is opened into.
 fn mount_dir() -> PathBuf {
-    std::env::temp_dir().join("HeMimizer").join("iso")
+    std::env::temp_dir().join("HeMiMizer").join("iso")
 }
 
 /// Opens the ISO without a drive letter, into a hidden folder (no new drive in File Explorer).

@@ -166,7 +166,7 @@ pub fn dwords(root: Root, key: &str, values: &[(&str, u32)]) -> Result<(), Strin
 /// Imports .reg text (written as UTF-16 with a BOM, as regedit writes it).
 pub fn reg_import(text: &str) -> Result<(), String> {
     log(&format!("reg import:\n{}", text.trim()));
-    let file = std::env::temp_dir().join(format!("HeMimizer-{}.reg", std::process::id()));
+    let file = std::env::temp_dir().join(format!("HeMiMizer-{}.reg", std::process::id()));
     let mut bytes = vec![0xFF, 0xFE];
     for u in text.encode_utf16() {
         bytes.extend_from_slice(&u.to_le_bytes());
@@ -226,23 +226,23 @@ pub fn exec(exe: &str, args: &[&str]) -> Result<Output, String> {
 
 static LOG: std::sync::Mutex<Option<(PathBuf, std::fs::File)>> = std::sync::Mutex::new(None);
 
-/// HeMimizer.log in "HeMimizer data" next to HeMimizer.exe; %LOCALAPPDATA%\HeMimizer when that folder is read-only.
-/// Only in Debug builds: the release writes no log at all (the user, 2026-11-18 – nothing of HeMimizer stays on the PC).
+/// HeMiMizer.log in "HeMiMizer data" next to HeMiMizer.exe; %LOCALAPPDATA%\HeMiMizer when that folder is read-only.
+/// Only in Debug builds: the release writes no log at all (the user, 2026-11-18 – nothing of HeMiMizer stays on the PC).
 pub fn log_init() {
     if !cfg!(debug_assertions) {
         return;
     }
-    let data = PathBuf::from(env("LOCALAPPDATA", "")).join("HeMimizer");
+    let data = PathBuf::from(env("LOCALAPPDATA", "")).join("HeMiMizer");
     let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from));
-    // after a restart the copy in %LOCALAPPDATA%\HeMimizer\app runs: the log stays where HeMimizer was started first
+    // after a restart the copy in %LOCALAPPDATA%\HeMiMizer\app runs: the log stays where HeMiMizer was started first
     let origin = exe_dir
         .as_ref()
         .filter(|d| d.starts_with(data.join("app")))
         .and_then(|_| std::fs::read_to_string(data.join("origin.txt")).ok())
         .map(|s| PathBuf::from(s.trim()))
         .filter(|p| p.exists());
-    let next_to_exe = origin.or(exe_dir).map(|d| d.join(crate::config::HOME).join("HeMimizer.log"));
-    let fallback = PathBuf::from(env("LOCALAPPDATA", "")).join(r"HeMimizer\HeMimizer.log");
+    let next_to_exe = origin.or(exe_dir).map(|d| d.join(crate::config::HOME).join("HeMiMizer.log"));
+    let fallback = PathBuf::from(env("LOCALAPPDATA", "")).join(r"HeMiMizer\HeMiMizer.log");
     for p in next_to_exe.into_iter().chain([fallback]) {
         if let Some(d) = p.parent() {
             let _ = std::fs::create_dir_all(d);
@@ -293,10 +293,10 @@ pub fn run(exe: &str, args: &[&str]) -> Result<String, String> {
 pub fn ps(script: &str) -> Result<String, String> {
     log(&format!("PowerShell:\n{}", script.trim()));
     // a readable .ps1 file instead of -EncodedCommand: an encoded command line is what malware does, and Microsoft
-    // Defender's machine learning flagged HeMimizer for it (Trojan:Win32/Bearfoos.A!ml, 2026-11-10)
+    // Defender's machine learning flagged HeMiMizer for it (Trojan:Win32/Bearfoos.A!ml, 2026-11-10)
     let full = format!("$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'\r\n{script}\r\n");
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let dir = std::env::temp_dir().join("HeMimizer");
+    let dir = std::env::temp_dir().join("HeMiMizer");
     let _ = std::fs::create_dir_all(&dir);
     let file = dir.join(format!("step-{}-{}.ps1", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
     // UTF-8 with a BOM, so that Windows PowerShell 5.1 reads Czech letters right
@@ -423,9 +423,9 @@ pub fn env(name: &str, fallback: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| fallback.into())
 }
 
-/// Where HeMimizer downloads the installers: a folder in the user's Downloads, deleted at the end.
+/// Where HeMiMizer downloads the installers: a folder in the user's Downloads, deleted at the end.
 pub fn work_dir() -> PathBuf {
-    downloads().join("HeMimizer")
+    downloads().join("HeMiMizer")
 }
 
 pub fn shell_open(target: &str) {
@@ -456,7 +456,7 @@ pub fn remove_file(p: impl AsRef<Path>) {
     let _ = std::fs::remove_file(p);
 }
 
-/// HeMimizer runs as administrator (its token is elevated).
+/// HeMiMizer runs as administrator (its token is elevated).
 pub fn elevated() -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};

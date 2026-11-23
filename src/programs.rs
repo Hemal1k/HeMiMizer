@@ -534,7 +534,7 @@ pub fn network_drives(c: &Ctx) -> Res {
     Ok(done.join(", "))
 }
 
-/// HeMimizer runs as administrator, and Windows keeps the drives of the administrator token apart from the
+/// HeMiMizer runs as administrator, and Windows keeps the drives of the administrator token apart from the
 /// normal one: File Explorer would not see them before the next sign-in. So the same `net use` runs once more
 /// as the user without elevation – a scheduled task with the limited token, started at once and deleted.
 fn map_for_user(c: &Ctx, mapped: &[(String, String)]) {
@@ -547,11 +547,11 @@ fn map_for_user(c: &Ctx, mapped: &[(String, String)]) {
         "$u = [Security.Principal.WindowsIdentity]::GetCurrent().Name\r\n\
          $a = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '/c {cmd}'\r\n\
          $p = New-ScheduledTaskPrincipal -UserId $u -LogonType Interactive -RunLevel Limited\r\n\
-         Register-ScheduledTask -TaskName 'HeMimizer - drives' -Action $a -Principal $p -Force | Out-Null\r\n\
-         Start-ScheduledTask -TaskName 'HeMimizer - drives'\r\n\
-         for ($i = 0; $i -lt 30 -and (Get-ScheduledTask -TaskName 'HeMimizer - drives').State -eq 'Running'; $i++) {{ Start-Sleep 1 }}\r\n\
-         (Get-ScheduledTaskInfo -TaskName 'HeMimizer - drives').LastTaskResult\r\n\
-         Unregister-ScheduledTask -TaskName 'HeMimizer - drives' -Confirm:$false",
+         Register-ScheduledTask -TaskName 'HeMiMizer - drives' -Action $a -Principal $p -Force | Out-Null\r\n\
+         Start-ScheduledTask -TaskName 'HeMiMizer - drives'\r\n\
+         for ($i = 0; $i -lt 30 -and (Get-ScheduledTask -TaskName 'HeMiMizer - drives').State -eq 'Running'; $i++) {{ Start-Sleep 1 }}\r\n\
+         (Get-ScheduledTaskInfo -TaskName 'HeMiMizer - drives').LastTaskResult\r\n\
+         Unregister-ScheduledTask -TaskName 'HeMiMizer - drives' -Confirm:$false",
         cmd = cmd.replace('\'', "''")
     ));
     if let Err(e) = r {
@@ -626,7 +626,7 @@ pub fn hemidock(c: &Ctx) -> Res {
             return Err(tr("HeMiDock.exe is missing after the installation.", "Po instalaci chybí HeMiDock.exe.").into());
         }
     }
-    // the installer starts the dock at its end – with the rights of HeMimizer (administrator): stopped, started again below
+    // the installer starts the dock at its end – with the rights of HeMiMizer (administrator): stopped, started again below
     std::thread::sleep(std::time::Duration::from_secs(2));
     if sys::is_running("HeMiDock.exe") {
         c.log(tr("Closing the running HeMiDock", "Zavírám spuštěný HeMiDock"));
@@ -650,7 +650,7 @@ pub const HEMIDOCK_FILES: &[&str] = &["settings.json", "pinned.json", "startpins
 
 /// The settings of HeMiDock as captured (hemidock.tar: the files above + the folder Pinned with the shortcuts of
 /// the dock) into %AppData%\HeMiDock, with the dock stopped. A pinned shortcut whose program is somewhere else
-/// now (Brave was per-user, HeMimizer installs it for all users) is replaced by the shortcut of the same name
+/// now (Brave was per-user, HeMiMizer installs it for all users) is replaced by the shortcut of the same name
 /// in the Start menu.
 fn hemidock_settings(c: &Ctx, exe: &Path) -> Result<(), String> {
     let tar = config::bytes("hemidock.tar");
@@ -689,7 +689,7 @@ fn hemidock_settings(c: &Ctx, exe: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Shortcuts in `dir` that lead nowhere now (Brave was per-user on the author's PC, HeMimizer installs it for all
+/// Shortcuts in `dir` that lead nowhere now (Brave was per-user on the author's PC, HeMiMizer installs it for all
 /// users) → the shortcut of the same name from the Start menu.
 pub fn fix_shortcuts(dir: &Path) -> Result<(), String> {
     let start = [start_menu(), PathBuf::from(sys::env("APPDATA", "")).join(r"Microsoft\Windows\Start Menu\Programs")];

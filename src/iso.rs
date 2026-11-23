@@ -1,9 +1,9 @@
-//! "Make a smaller Windows" – a lighter Windows 11 ISO in the spirit of Tiny11, by HeMimizer's own list (no
+//! "Make a smaller Windows" – a lighter Windows 11 ISO in the spirit of Tiny11, by HeMiMizer's own list (no
 //! third-party script): one edition is taken from the ISO, the apps and parts chosen are removed, the registry of the
 //! image gets the chosen settings, the image is cleaned and compressed, and a new bootable ISO (BIOS + UEFI) is made
 //! with oscdimg of Microsoft (downloaded from Microsoft's symbol server, its signature checked).
 //!
-//! The work runs in C:\HeMimizer-ISO (DISM needs a local NTFS folder) and is removed at the end, also after an error
+//! The work runs in C:\HeMiMizer-ISO (DISM needs a local NTFS folder) and is removed at the end, also after an error
 //! (the image is unmounted without saving, the hives unloaded, the ISO closed).
 
 use crate::sys;
@@ -78,7 +78,7 @@ pub struct Options {
     pub chosen: Vec<String>,
     /// drivers to add (a folder with .inf files), empty = none
     pub drivers: String,
-    /// HeMimizer.exe on the desktop of the new Windows
+    /// HeMiMizer.exe on the desktop of the new Windows
     pub add_hemimizer: bool,
     /// the image compressed harder (install.esd – smaller, slower to make)
     pub esd: bool,
@@ -98,7 +98,7 @@ pub fn simple() -> Vec<String> {
 }
 
 fn work() -> PathBuf {
-    PathBuf::from(format!(r"{}\HeMimizer-ISO", sys::env("SystemDrive", "C:")))
+    PathBuf::from(format!(r"{}\HeMiMizer-ISO", sys::env("SystemDrive", "C:")))
 }
 
 fn q(s: &str) -> String {
@@ -288,7 +288,7 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
         if let Ok(exe) = std::env::current_exe() {
             let desk = mount.join(r"Users\Public\Desktop");
             let _ = std::fs::create_dir_all(&desk);
-            let _ = std::fs::copy(exe, desk.join("HeMimizer.exe"));
+            let _ = std::fs::copy(exe, desk.join("HeMiMizer.exe"));
         }
     }
     if o.deep_clean {

@@ -71,7 +71,7 @@ fn get(s: &Session, url: &str, ua: &str, referer: Option<&str>) -> Result<String
 
 /// A new session: the product's edition from its page, then the session registered the way the page does it.
 pub fn start(product: Product) -> Result<Session, String> {
-    let dir = std::env::temp_dir().join("HeMimizer");
+    let dir = std::env::temp_dir().join("HeMiMizer");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let id = sys::ps("[guid]::NewGuid().ToString()")?.trim().to_string();
     let mut s = Session { product, edition: String::new(), id: id.clone(), jar: dir.join(format!("ms-{id}.cookies")) };
@@ -183,7 +183,7 @@ impl Drop for Session {
     }
 }
 
-/// The curl of a download that runs (0 = none): stopped when HeMimizer closes, else it went on without the window.
+/// The curl of a download that runs (0 = none): stopped when HeMiMizer closes, else it went on without the window.
 static RUNNING: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Stops a download that runs (the .part file stays: the next start goes on from it).

@@ -1,4 +1,4 @@
-// Embeds the icon, the version info and the manifest (run as administrator) into HeMimizer.exe.
+// Embeds the icon, the version info and the manifest (run as administrator) into HeMiMizer.exe.
 fn main() {
     println!("cargo:rerun-if-changed=assets");
     println!("cargo:rerun-if-changed=src");
@@ -8,9 +8,9 @@ fn main() {
     // the release always runs as administrator; a Debug build runs as the user (for `--check` and the look)
     let level = if std::env::var("PROFILE").as_deref() == Ok("release") { "requireAdministrator" } else { "asInvoker" };
     let mut res = winresource::WindowsResource::new();
-    res.set_icon("assets/HeMimizer.ico")
-        .set("FileDescription", "HeMimizer")
-        .set("ProductName", "HeMimizer")
+    res.set_icon("assets/HeMiMizer.ico")
+        .set("FileDescription", "HeMiMizer")
+        .set("ProductName", "HeMiMizer")
         .set("CompanyName", "HeMi")
         .set("LegalCopyright", "© Richard Hemala")
         .set_manifest(

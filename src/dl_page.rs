@@ -1,6 +1,6 @@
 //! The page "Download Windows": the ISO of Windows 11 or 10 in the language chosen, straight from Microsoft (msiso.rs).
 
-use super::{Action, HeMimizerApp};
+use super::{Action, HeMiMizerApp};
 use crate::msiso::{self, Language, Product, Session};
 use crate::theme::glyph;
 use crate::widgets::{Btn, Tone, card, info_bar, section};
@@ -75,7 +75,7 @@ impl DlUi {
     }
 }
 
-impl HeMimizerApp {
+impl HeMiMizerApp {
     pub(super) fn dl_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
         let state = self.dl.state.lock().unwrap().clone();

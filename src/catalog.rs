@@ -1,6 +1,6 @@
 //! What the wizard offers: drivers, the software of the maker, browsers, common programs and HeMi Launcher. Most come
 //! through winget (also the Microsoft Store through its source msstore); HeMi Launcher from its releases on GitHub; the
-//! AMD drivers from amd.com (or the installers next to HeMimizer.exe). `license`: the terms the user has to accept
+//! AMD drivers from amd.com (or the installers next to HeMiMizer.exe). `license`: the terms the user has to accept
 //! (empty for open-source programs).
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -68,7 +68,7 @@ pub enum Source {
     /// an MSI of the newest release of another project on GitHub (not in winget): (owner/repo, the end of the asset's
     /// name – the name carries the version)
     Release(&'static str, &'static str),
-    /// the own steps of HeMimizer (the AMD drivers)
+    /// the own steps of HeMiMizer (the AMD drivers)
     Own,
 }
 

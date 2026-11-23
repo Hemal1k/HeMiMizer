@@ -1,5 +1,5 @@
 //! The look all HeMi apps in Rust share: the theme (automatic / light / dark) and the language (automatic / English /
-//! Czech), chosen at the top of the settings and kept in %AppData%\HeMi\HeMimizer\appearance.ini.
+//! Czech), chosen at the top of the settings and kept in %AppData%\HeMi\HeMiMizer\appearance.ini.
 
 use std::path::PathBuf;
 
@@ -12,7 +12,7 @@ pub struct Look {
 }
 
 fn file() -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("APPDATA")?).join("HeMi").join("HeMimizer").join("appearance.ini"))
+    Some(PathBuf::from(std::env::var_os("APPDATA")?).join("HeMi").join("HeMiMizer").join("appearance.ini"))
 }
 
 impl Look {

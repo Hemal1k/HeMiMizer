@@ -1,5 +1,5 @@
 //! Backup mode – before Windows is reinstalled: the chosen settings of this PC go into the config folder next to
-//! HeMimizer.exe, and every installer (the programs, the runtimes, the AMD drivers, HeMiDock) into the folder
+//! HeMiMizer.exe, and every installer (the programs, the runtimes, the AMD drivers, HeMiDock) into the folder
 //! `installers` next to it – so the setup after the reinstall needs no internet until its very end.
 //! The choice can be kept as the user's own default (config\backup-choice.txt).
 
@@ -48,7 +48,7 @@ pub fn save_choice(ids: &[String]) -> Result<(), String> {
     std::fs::write(choice_file(), ids.join("\r\n")).map_err(|e| e.to_string())
 }
 
-/// The folder of the installers next to HeMimizer.exe.
+/// The folder of the installers next to HeMiMizer.exe.
 pub fn installers_dir() -> PathBuf {
     config::dir().parent().map(Path::to_path_buf).unwrap_or_default().join("installers")
 }
@@ -163,7 +163,7 @@ fn file_name(url: &str) -> String {
     url.split(['?', '#']).next().unwrap_or(url).trim_end_matches("/download").rsplit('/').next().unwrap_or("setup.exe").to_string()
 }
 
-/// Downloads the newest installer of everything HeMimizer installs into `installers`; a file of the same name that is
+/// Downloads the newest installer of everything HeMiMizer installs into `installers`; a file of the same name that is
 /// there already is kept (the backup before the next reinstall only adds what is new) and older ones are removed.
 pub fn download_installers(log: &dyn Fn(String)) -> Result<String, String> {
     let dir = installers_dir();
@@ -177,7 +177,7 @@ pub fn download_installers(log: &dyn Fn(String)) -> Result<String, String> {
     if crate::install::chosen("hemidock") {
         want.push(Wanted { id: "hemidock".into(), name: "HeMiDock".into(), resolve: Box::new(|| Ok((programs::HEMIDOCK_SETUP.to_string(), String::new()))), referer: None });
     }
-    // the AMD drivers keep their own names: HeMimizer tells them apart by them (and by the product name inside)
+    // the AMD drivers keep their own names: HeMiMizer tells them apart by them (and by the product name inside)
     if crate::install::chosen("amd-chipset") {
         want.push(Wanted { id: "amd-chipset".into(), name: tr("AMD chipset driver", "Ovladač čipsetu AMD").into(), resolve: Box::new(|| drivers::url_chipset().map(|u| (u, String::new()))), referer: Some("https://www.amd.com/") });
     }
@@ -246,18 +246,18 @@ pub fn download_installers(log: &dyn Fn(String)) -> Result<String, String> {
 }
 
 /// The name of the packed backup next to the folder.
-pub const ZIP: &str = "HeMimizer backup.zip";
+pub const ZIP: &str = "HeMiMizer backup.zip";
 
-/// Packs the backup (the folder "HeMimizer data" and HeMimizer.exe) into one .zip next to them – one file is easier to
+/// Packs the backup (the folder "HeMiMizer data" and HeMiMizer.exe) into one .zip next to them – one file is easier to
 /// move. Stored without compression: the installers are compressed already, and it is fast. The folder stays (the
-/// .zip is checked first); HeMimizer unpacks a .zip it finds next to itself at its start.
+/// .zip is checked first); HeMiMizer unpacks a .zip it finds next to itself at its start.
 pub fn pack() -> Result<String, String> {
     let to = config::save_to();
     let zip = to.join(ZIP);
     let _ = std::fs::remove_file(&zip);
     let mut what = vec![config::HOME.to_string()];
-    if to.join("HeMimizer.exe").is_file() {
-        what.push("HeMimizer.exe".into());
+    if to.join("HeMiMizer.exe").is_file() {
+        what.push("HeMiMizer.exe".into());
     }
     let (z, dir) = (zip.display().to_string(), to.display().to_string());
     let mut args = vec!["-a", "-c", "-f", &z, "--options", "zip:compression=store", "-C", &dir];
@@ -271,7 +271,7 @@ pub fn pack() -> Result<String, String> {
     Ok(format!("{} ({:.1} GB)", zip.display(), size as f64 / 1e9))
 }
 
-/// At the start: a packed backup next to HeMimizer.exe without its folder is unpacked (the exe in it is left out –
+/// At the start: a packed backup next to HeMiMizer.exe without its folder is unpacked (the exe in it is left out –
 /// it is the one that runs).
 pub fn unpack_if_packed() {
     let dir = config::exe_dir();
@@ -280,7 +280,7 @@ pub fn unpack_if_packed() {
         return;
     }
     let (z, d) = (zip.display().to_string(), dir.display().to_string());
-    match sys::exec(&system_tar(), &["-x", "-f", &z, "-C", &d, "--exclude", "HeMimizer.exe"]) {
+    match sys::exec(&system_tar(), &["-x", "-f", &z, "-C", &d, "--exclude", "HeMiMizer.exe"]) {
         Ok(o) if o.code == 0 => sys::log(&format!("unpacked {z}")),
         Ok(o) => sys::log(&format!("unpack {z}: tar {} {}", o.code, o.text.trim())),
         Err(e) => sys::log(&format!("unpack {z}: {e}")),

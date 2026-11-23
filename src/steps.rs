@@ -1,6 +1,6 @@
-//! The list of what HeMimizer does, in the order it is done, and the worker that does it.
-//! After the graphics driver (when a driver was installed) the PC restarts and HeMimizer continues
-//! by itself after the sign-in (a scheduled task "HeMimizer – continue", run as administrator).
+//! The list of what HeMiMizer does, in the order it is done, and the worker that does it.
+//! After the graphics driver (when a driver was installed) the PC restarts and HeMiMizer continues
+//! by itself after the sign-in (a scheduled task "HeMiMizer – continue", run as administrator).
 
 use crate::i18n::tr;
 use crate::{drivers, programs, sys, windows};
@@ -161,8 +161,8 @@ pub fn all() -> Vec<Step> {
             Drivers,
             "AMD chipset driver",
             "Ovladač čipsetu AMD",
-            "Offline from the installer next to HeMimizer.exe, else the newest from amd.com",
-            "Offline z instalačky vedle HeMimizer.exe, jinak nejnovější z amd.com",
+            "Offline from the installer next to HeMiMizer.exe, else the newest from amd.com",
+            "Offline z instalačky vedle HeMiMizer.exe, jinak nejnovější z amd.com",
             drivers::chipset
         ),
         step!(
@@ -170,8 +170,8 @@ pub fn all() -> Vec<Step> {
             Drivers,
             "AMD graphics driver",
             "Ovladač grafiky AMD",
-            "Offline from the installer next to HeMimizer.exe, else from amd.com (~1 GB); then a restart, HeMimizer continues",
-            "Offline z instalačky vedle HeMimizer.exe, jinak z amd.com (~1 GB); pak restart, HeMimizer pokračuje",
+            "Offline from the installer next to HeMiMizer.exe, else from amd.com (~1 GB); then a restart, HeMiMizer continues",
+            "Offline z instalačky vedle HeMiMizer.exe, jinak z amd.com (~1 GB); pak restart, HeMiMizer pokračuje",
             drivers::gpu
         ),
         step!(
@@ -215,8 +215,8 @@ pub fn all() -> Vec<Step> {
             Drivers,
             "AMD graphics settings",
             "Nastavení grafiky AMD",
-            "The Adrenalin settings from the backup; the OC profile is saved to Documents\\HeMimizer",
-            "Nastavení Adrenalinu ze zálohy; OC profil se uloží do Dokumenty\\HeMimizer",
+            "The Adrenalin settings from the backup; the OC profile is saved to Documents\\HeMiMizer",
+            "Nastavení Adrenalinu ze zálohy; OC profil se uloží do Dokumenty\\HeMiMizer",
             drivers::gpu_settings
         ),
         step!("display", Drivers, "Monitor", "Monitor", "The highest refresh rate of each monitor; the scaling from the backup", "Nejvyšší obnovovací frekvence každého monitoru; měřítko ze zálohy", windows::display),
@@ -345,7 +345,7 @@ pub fn all() -> Vec<Step> {
     ];
     // the order of the work (2026-11-14, the author's wish): the network drives first (the backup is on the NAS);
     // then everything that works offline – the drivers from the backup and a restart, the programs from the
-    // installers of the backup, the settings of Windows; only then HeMimizer asks to connect the internet and does
+    // installers of the backup, the settings of Windows; only then HeMiMizer asks to connect the internet and does
     // what needs it: the installers missing from the backup (their steps were put off), HeMiDock from GitHub, the
     // Microsoft Store, Windows features (.NET 3.5 comes from Windows Update) and Windows Update – again after every
     // restart until nothing is left –, and the clean-up last (it also deletes the downloaded updates)
@@ -396,7 +396,7 @@ pub enum Event {
     Done(usize, Res),
     /// The step needs the internet: it runs again after it is connected (it is not counted as done).
     Later(usize),
-    /// HeMimizer waits for the internet (true) / is connected again (false).
+    /// HeMiMizer waits for the internet (true) / is connected again (false).
     Internet(bool),
     /// Downloads failed: (id, name, error) – the window asks for the files or another try.
     NeedFiles(Vec<(String, String, String)>),
@@ -442,7 +442,7 @@ impl Ctx {
 }
 
 fn data_dir() -> PathBuf {
-    PathBuf::from(sys::env("LOCALAPPDATA", "")).join("HeMimizer")
+    PathBuf::from(sys::env("LOCALAPPDATA", "")).join("HeMiMizer")
 }
 
 fn resume_file() -> PathBuf {
@@ -462,17 +462,17 @@ fn todo_add(line: &str) {
     }
 }
 
-/// The folder HeMimizer.exe was started from at first (kept over the restarts, when the copy in
-/// %LOCALAPPDATA%\HeMimizer\app runs): the log and the to-do file stay there.
+/// The folder HeMiMizer.exe was started from at first (kept over the restarts, when the copy in
+/// %LOCALAPPDATA%\HeMiMizer\app runs): the log and the to-do file stay there.
 pub fn origin_file() -> PathBuf {
     data_dir().join("origin.txt")
 }
 
-/// At the very end: "HeMimizer - udělat ručně.txt" next to the log.
+/// At the very end: "HeMiMizer - udělat ručně.txt" next to the log.
 fn write_todo() -> Option<PathBuf> {
     let dir = sys::log_path().parent()?.to_path_buf();
     let mut t = String::new();
-    t.push_str(tr("HeMimizer – left to do by hand\r\n\r\n", "HeMimizer – zbývá udělat ručně\r\n\r\n"));
+    t.push_str(tr("HeMiMizer – left to do by hand\r\n\r\n", "HeMiMizer – zbývá udělat ručně\r\n\r\n"));
     let apps = crate::catalog::default_apps(&crate::plan::Plan::load().unwrap_or_default());
     if !apps.is_empty() {
         t.push_str(&format!(
@@ -486,8 +486,8 @@ fn write_todo() -> Option<PathBuf> {
             t.push_str("\r\n");
         }
     }
-    t.push_str(tr("\r\nThe details are in HeMimizer.log.\r\n", "\r\nPodrobnosti jsou v HeMimizer.log.\r\n"));
-    let file = dir.join(tr("HeMimizer - to do by hand.txt", "HeMimizer - udělat ručně.txt"));
+    t.push_str(tr("\r\nThe details are in HeMiMizer.log.\r\n", "\r\nPodrobnosti jsou v HeMiMizer.log.\r\n"));
+    let file = dir.join(tr("HeMiMizer - to do by hand.txt", "HeMiMizer - udělat ručně.txt"));
     let mut bytes = vec![0xEF, 0xBB, 0xBF];
     bytes.extend_from_slice(t.as_bytes());
     std::fs::write(&file, bytes).ok()?;
@@ -510,32 +510,32 @@ fn on_fixed_disk(path: &std::path::Path) -> bool {
     unsafe { GetDriveTypeW(w.as_ptr()) == 3 }
 }
 
-/// The folder HeMimizer was started from at first (also after the restarts, when its copy runs).
+/// The folder HeMiMizer was started from at first (also after the restarts, when its copy runs).
 fn original_dir() -> PathBuf {
     let origin = std::fs::read_to_string(origin_file()).ok().map(|s| PathBuf::from(s.trim())).filter(|p| p.exists());
     origin.unwrap_or_else(crate::config::exe_dir)
 }
 
-/// The folder "HeMimizer data" goes at the end (not on a USB stick or a network drive: there it is the kit for the
+/// The folder "HeMiMizer data" goes at the end (not on a USB stick or a network drive: there it is the kit for the
 /// next installation).
 pub fn removes_data() -> bool {
     on_fixed_disk(&original_dir())
 }
 
-/// When the window closes after the last run, nothing of HeMimizer stays on the PC (the user, 2026-11-18): its folder
-/// "HeMimizer data", %LOCALAPPDATA%\HeMimizer (the copy for the restarts, the state between them) and its temporary
+/// When the window closes after the last run, nothing of HeMiMizer stays on the PC (the user, 2026-11-18): its folder
+/// "HeMiMizer data", %LOCALAPPDATA%\HeMiMizer (the copy for the restarts, the state between them) and its temporary
 /// files go right away. The exe that runs cannot be deleted while it runs: Windows deletes it at the next restart (as
 /// installers do – no helper process waits for it). On a USB stick the exe and its folder stay (the kit for the next
-/// installation). A Debug build keeps its log in %LOCALAPPDATA%\HeMimizer (the release writes none).
+/// installation). A Debug build keeps its log in %LOCALAPPDATA%\HeMiMizer (the release writes none).
 pub fn remove_myself() {
     let exe = std::env::current_exe().unwrap_or_default();
     let original = original_dir();
     let local = data_dir();
     let fixed = on_fixed_disk(&original);
-    sys::log(&format!("removing HeMimizer (its folder too: {fixed})"));
+    sys::log(&format!("removing HeMiMizer (its folder too: {fixed})"));
     let home = original.join(crate::config::HOME);
     if cfg!(debug_assertions) && fixed {
-        // Debug: the log into %LOCALAPPDATA%\HeMimizer before its folder goes
+        // Debug: the log into %LOCALAPPDATA%\HeMiMizer before its folder goes
         sys::log_close();
         let _ = std::fs::create_dir_all(&local);
         if let Ok(rd) = std::fs::read_dir(&home) {
@@ -544,10 +544,10 @@ pub fn remove_myself() {
             }
         }
     }
-    for d in [std::env::temp_dir().join("HeMimizer"), sys::work_dir(), local.join("app")] {
+    for d in [std::env::temp_dir().join("HeMiMizer"), sys::work_dir(), local.join("app")] {
         let _ = std::fs::remove_dir_all(d);
     }
-    let _ = std::fs::remove_file(std::env::temp_dir().join("HeMimizer-ThirdPartyNotices.txt"));
+    let _ = std::fs::remove_file(std::env::temp_dir().join("HeMiMizer-ThirdPartyNotices.txt"));
     if cfg!(debug_assertions) {
         for f in [todo_file(), origin_file(), resume_file(), local.join("wu-rounds.txt")] {
             let _ = std::fs::remove_file(f);
@@ -561,7 +561,7 @@ pub fn remove_myself() {
     }
     if fixed {
         let _ = std::fs::remove_dir_all(&home);
-        let file = original.join("HeMimizer.exe");
+        let file = original.join("HeMiMizer.exe");
         if std::fs::remove_file(&file).is_err() && file.exists() {
             delete_at_restart(&file);
         }
@@ -585,7 +585,7 @@ fn delete_at_restart(path: &std::path::Path) {
     unsafe { MoveFileExW(w.as_ptr(), std::ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT) };
 }
 
-const TASK: &str = "HeMimizer - continue";
+const TASK: &str = "HeMiMizer - continue";
 
 /// The ids of the steps left for after the restart (written by the run before it).
 pub fn pending_resume() -> Vec<String> {
@@ -597,12 +597,12 @@ pub fn clear_resume() {
     let _ = sys::exec("schtasks.exe", &["/delete", "/tn", TASK, "/f"]);
 }
 
-/// Saves the steps that are left and schedules HeMimizer to continue after the next sign-in. HeMimizer and its
-/// config folder are copied to %LOCALAPPDATA%\HeMimizer\app first – a USB stick or a network drive may be gone then.
+/// Saves the steps that are left and schedules HeMiMizer to continue after the next sign-in. HeMiMizer and its
+/// config folder are copied to %LOCALAPPDATA%\HeMiMizer\app first – a USB stick or a network drive may be gone then.
 fn schedule_resume(ids: &[&str]) -> Result<(), String> {
     let app = data_dir().join("app");
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let target = app.join("HeMimizer.exe");
+    let target = app.join("HeMiMizer.exe");
     if exe != target {
         let _ = std::fs::remove_dir_all(&app);
         std::fs::create_dir_all(app.join(crate::config::HOME).join("config")).map_err(|e| e.to_string())?;

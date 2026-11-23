@@ -253,7 +253,7 @@ fn widgets(c: &Ctx) -> Result<(), String> {
 
 /// Runs a command line as the system account (a scheduled task) and waits for it (at most 30 s).
 fn as_system(line: &str) -> Result<(), String> {
-    const TASK: &str = "HeMimizer-as-system";
+    const TASK: &str = "HeMiMizer-as-system";
     sys::run("schtasks.exe", &["/create", "/tn", TASK, "/tr", line, "/sc", "once", "/st", "00:00", "/ru", "SYSTEM", "/rl", "HIGHEST", "/f"])?;
     let r = sys::run("schtasks.exe", &["/run", "/tn", TASK]).map(|_| ());
     for _ in 0..30 {

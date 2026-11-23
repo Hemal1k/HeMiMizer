@@ -16,13 +16,13 @@ pub fn remove_appx(names: &[&str]) -> Result<(), String> {
     .map(|_| ())
 }
 
-/// A restore point before HeMimizer changes anything (System Protection of C: is switched on for it).
+/// A restore point before HeMiMizer changes anything (System Protection of C: is switched on for it).
 pub fn restore_point(c: &Ctx) -> Res {
     c.log("Creating a restore point");
     // Windows makes at most one point a day unless this is 0
     sys::set_dword(sys::Root::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore", "SystemRestorePointCreationFrequency", 0)?;
-    sys::ps("Enable-ComputerRestore -Drive \"$env:SystemDrive\\\"; Checkpoint-Computer -Description 'Before HeMimizer' -RestorePointType MODIFY_SETTINGS")?;
-    Ok("Restore point \"Before HeMimizer\"".into())
+    sys::ps("Enable-ComputerRestore -Drive \"$env:SystemDrive\\\"; Checkpoint-Computer -Description 'Before HeMiMizer' -RestorePointType MODIFY_SETTINGS")?;
+    Ok("Restore point \"Before HeMiMizer\"".into())
 }
 
 pub fn hibernation_off(_c: &Ctx) -> Res {

@@ -19,7 +19,7 @@ pub const OPTIONS: &[(&str, bool)] = &[
     ("cleanup", true),
 ];
 
-/// Steps of the author's own taste that the public HeMimizer never runs.
+/// Steps of the author's own taste that the public HeMiMizer never runs.
 pub const NEVER: &[&str] = &["restore", "calculator"];
 
 pub fn is_option(id: &str) -> bool {

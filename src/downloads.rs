@@ -147,7 +147,7 @@ pub fn prepared_ids(prefix: &str) -> Vec<String> {
 }
 
 /// The step "Installers from the backup": the installers the backup downloaded (the folder `installers` next to
-/// HeMimizer.exe) are copied to this PC â€“ the network drive or the USB stick may be gone after the restart â€“ and the
+/// HeMiMizer.exe) are copied to this PC â€“ the network drive or the USB stick may be gone after the restart â€“ and the
 /// install steps take them instead of downloading. The AMD drivers are taken from that folder directly.
 pub fn import_offline(c: &Ctx) -> Res {
     let list = crate::backup::offline();

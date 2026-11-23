@@ -1,8 +1,8 @@
-// HeMimizer – gets a freshly installed Windows ready: drivers, programs and settings of the author.
-//   HeMimizer.exe            asks for the NAS password, then does everything and shows its progress
-//   HeMimizer.exe --resume   continues after the restart (the scheduled task "HeMimizer - continue")
-//   HeMimizer.exe --capture  saves the settings of this PC to the folder config next to the exe
-//   HeMimizer.exe --check    shows the newest versions of the programs and drivers
+// HeMiMizer – gets a freshly installed Windows ready: drivers, programs and settings of the author.
+//   HeMiMizer.exe            asks for the NAS password, then does everything and shows its progress
+//   HeMiMizer.exe --resume   continues after the restart (the scheduled task "HeMiMizer - continue")
+//   HeMiMizer.exe --capture  saves the settings of this PC to the folder config next to the exe
+//   HeMiMizer.exe --check    shows the newest versions of the programs and drivers
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
@@ -67,7 +67,7 @@ fn main() -> eframe::Result {
     let display = sys::get_sz(sys::Root::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "DisplayVersion").unwrap_or_default();
     let product = sys::get_sz(sys::Root::Hklm, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "ProductName").unwrap_or_default();
     sys::log(&format!(
-        "======== HeMimizer {} started {:?} | {product} {display} build {build} | PC {} | user {} | exe {} | config {} (exists: {})",
+        "======== HeMiMizer {} started {:?} | {product} {display} build {build} | PC {} | user {} | exe {} | config {} (exists: {})",
         env!("CARGO_PKG_VERSION"),
         args,
         sys::env("COMPUTERNAME", "?"),
@@ -85,12 +85,12 @@ fn main() -> eframe::Result {
         for l in drivers::local_installers() {
             text.push_str(&format!("\n{}: {:?} {} ({})", tr("Next to the exe", "Vedle exe"), l.kind, l.path.display(), l.version));
         }
-        message(tr("HeMimizer – newest versions", "HeMimizer – nejnovější verze"), &text);
+        message(tr("HeMiMizer – newest versions", "HeMiMizer – nejnovější verze"), &text);
         return Ok(());
     }
     if args.iter().any(|a| a == "--capture") {
         let text = report(config::capture());
-        message(tr("HeMimizer – settings captured", "HeMimizer – nastavení zachyceno"), &text);
+        message(tr("HeMiMizer – settings captured", "HeMiMizer – nastavení zachyceno"), &text);
         return Ok(());
     }
     // Debug builds only: try the removal at the end on a copy of the exe
@@ -159,11 +159,11 @@ fn main() -> eframe::Result {
     }
     let mode = if args.iter().any(|a| a == "--resume") && !steps::pending_resume().is_empty() { app::Mode::Resume } else { app::Mode::Normal };
 
-    let icon = egui::IconData { rgba: include_bytes!("../assets/HeMimizer-64.rgba").to_vec(), width: 64, height: 64 };
+    let icon = egui::IconData { rgba: include_bytes!("../assets/HeMiMizer-64.rgba").to_vec(), width: 64, height: 64 };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("HeMimizer")
-            .with_app_id("HeMimizer")
+            .with_title("HeMiMizer")
+            .with_app_id("HeMiMizer")
             .with_inner_size([840.0, 700.0])
             .with_min_inner_size([600.0, 480.0])
             .with_icon(icon)
@@ -172,7 +172,7 @@ fn main() -> eframe::Result {
         centered: true,
         ..Default::default()
     };
-    // Print Screen in the window of HeMimizer (as administrator Windows does not pass it to the screen capture)
+    // Print Screen in the window of HeMiMizer (as administrator Windows does not pass it to the screen capture)
     printscreen::watch();
-    eframe::run_native("HeMimizer", options, Box::new(move |cc| Ok(Box::new(app::HeMimizerApp::new(cc, mode)))))
+    eframe::run_native("HeMiMizer", options, Box::new(move |cc| Ok(Box::new(app::HeMiMizerApp::new(cc, mode)))))
 }

@@ -1,6 +1,6 @@
 //! The page "Make a smaller Windows" of the window (the work is in iso.rs).
 
-use super::{Action, HeMimizerApp};
+use super::{Action, HeMiMizerApp};
 use crate::iso;
 use crate::theme::glyph;
 use crate::widgets::{Btn, Tone, card, info_bar, section};
@@ -32,7 +32,7 @@ impl IsoUi {
     pub fn new() -> IsoUi {
         let out = crate::sys::known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Downloads)
             .unwrap_or_else(crate::sys::profile)
-            .join("Windows 11 HeMimizer.iso");
+            .join("Windows 11 HeMiMizer.iso");
         IsoUi { chosen: iso::simple(), deep_clean: true, esd: true, out: out.display().to_string(), ..Default::default() }
     }
 
@@ -82,7 +82,7 @@ impl IsoUi {
     }
 }
 
-impl HeMimizerApp {
+impl HeMiMizerApp {
     pub(super) fn iso_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
         let state = self.iso.state.lock().unwrap().clone();
@@ -94,7 +94,7 @@ impl HeMimizerApp {
                         ui.label(RichText::new(now.as_str()).size(14.0).color(p.text));
                     });
                     ui.add_space(6.0);
-                    ui.label(RichText::new("It takes 20–60 minutes. The PC can be used meanwhile; do not close HeMimizer.").size(12.0).color(p.text3));
+                    ui.label(RichText::new("It takes 20–60 minutes. The PC can be used meanwhile; do not close HeMiMizer.").size(12.0).color(p.text3));
                     return;
                 }
                 Some(Ok(t)) => info_bar(ui, &p, Tone::Success, &format!("Done: {t}. Make a USB stick from it on the first page."), None),
@@ -177,13 +177,13 @@ impl HeMimizerApp {
                     acts.push(Action::IsoDrivers);
                 }
                 ui.add_space(4.0);
-                ui.checkbox(&mut s.add_hemimizer, "HeMimizer on the desktop of the new Windows");
+                ui.checkbox(&mut s.add_hemimizer, "HeMiMizer on the desktop of the new Windows");
                 ui.checkbox(&mut s.deep_clean, "Clean the image (smaller, adds ~15 minutes)");
                 ui.checkbox(&mut s.esd, "Compress harder (install.esd – smaller, adds ~20 minutes)");
             });
         } else {
             ui.add_space(4.0);
-            ui.checkbox(&mut s.add_hemimizer, "HeMimizer on the desktop of the new Windows");
+            ui.checkbox(&mut s.add_hemimizer, "HeMiMizer on the desktop of the new Windows");
         }
         ui.add_space(10.0);
         section(ui, &p, "Save as");
