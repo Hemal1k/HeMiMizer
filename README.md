@@ -46,6 +46,7 @@ and Done removes HeMiMizer from the PC – it writes no log, nothing of it stays
 | Download Windows | The ISO of Windows 11 or 10 in the language you choose, straight from Microsoft's servers, with its progress – then a USB stick or a smaller Windows from it in one click. |
 | Make a Windows USB stick | From a Windows 10 / 11 ISO, like Rufus: GPT (UEFI) or MBR (BIOS or UEFI), NTFS (a small FAT32 boot partition and an NTFS one – images of any size) or FAT32 with a split install.wim, the name from the ISO, and your choices for the installation – no TPM 2.0 / Secure Boot / RAM check, no Microsoft account required, a local account, the region and time zone you pick, no privacy questions, no automatic BitLocker. |
 | Make a smaller Windows | A lighter Windows 11 ISO in the spirit of Tiny11, by HeMiMizer's own list: one edition, without ads, Teams, Clipchamp, Xbox, OneDrive and other extras, no TPM check, no Microsoft account needed – the simple choice, or choose yourself what goes and what stays; drivers and HeMiMizer can be added. |
+| Updates itself | At the start it asks GitHub for a newer HeMiMizer and offers it on the first page – downloaded, checked against the checksums of the release and started in place of the old one (Settings → Updates; with HeMi Launcher on the PC the launcher does it). |
 
 Programs with their own licence terms are listed at the setup, each with a link: HeMiMizer installs them only after you
 accept, or leaves them out.
