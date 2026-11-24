@@ -191,17 +191,23 @@ fn install_offline(c: &Ctx, item: &Item) -> Result<bool, String> {
     let kind = field(&manifest, "InstallerType").unwrap_or_else(|| if matches!(item.source, Source::GitHub(..)) { "inno".into() } else { String::new() });
     let file = installer.display().to_string();
     let ext = installer.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
+    // the switches of the manifest next to the installer: only known silent-install switches (audit 2026-11-24 – the
+    // backup is not checked by anyone, and the installer runs as administrator)
     let switches = |default: &str| {
         let mut s = field(&manifest, "Silent").unwrap_or_else(|| default.to_string());
         if let Some(custom) = field(&manifest, "Custom") {
             s.push(' ');
             s.push_str(&custom);
         }
-        s
+        let (ok, refused): (Vec<&str>, Vec<&str>) = s.split_whitespace().partition(|a| switch_allowed(a));
+        if !refused.is_empty() {
+            sys::log(&format!("installer switches of the backup left out: {}", refused.join(" ")));
+        }
+        ok.join(" ")
     };
     let split = |s: String| s.split_whitespace().map(String::from).collect::<Vec<_>>();
     let r = match (kind.as_str(), ext.as_str()) {
-        (_, "msix" | "msixbundle" | "appx") | ("msix" | "appx", _) => sys::ps(&format!("Add-AppxPackage -Path '{file}'")).map(|_| ()),
+        (_, "msix" | "msixbundle" | "appx") | ("msix" | "appx", _) => sys::ps(&format!("Add-AppxPackage -Path '{}'", file.replace('\'', "''"))).map(|_| ()),
         ("msi" | "wix", _) | (_, "msi") => {
             let mut a = vec!["/i".to_string(), file.clone()];
             a.extend(split(switches("/quiet /norestart")));
@@ -229,6 +235,19 @@ fn install_offline(c: &Ctx, item: &Item) -> Result<bool, String> {
         }
     };
     r.map(|()| true)
+}
+
+/// The switches of a silent install a manifest of the backup may give (Inno Setup, NSIS, MSI, WiX Burn and the usual
+/// ones of other installers); compared without regard to case.
+const SWITCHES: &[&str] = &[
+    "/S", "/SILENT", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/NOCANCEL", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS",
+    "/NOICONS", "/ALLUSERS", "/CURRENTUSER", "/quiet", "/qn", "/qb", "/passive", "/norestart", "/install", "/q", "/silent", "/sAll", "/rs",
+    "/rps", "/msi", "-s", "-q", "--silent", "--quiet", "--norestart", "--no-restart", "--install", "-silent", "REBOOT=ReallySuppress",
+    "ALLUSERS=1", "ALLUSERS=2", "MSIINSTALLPERUSER=1", "MSIINSTALLPERUSER=\"\"",
+];
+
+pub fn switch_allowed(a: &str) -> bool {
+    SWITCHES.iter().any(|s| s.eq_ignore_ascii_case(a))
 }
 
 /// The first value of `name:` in a manifest of winget (quotes removed).

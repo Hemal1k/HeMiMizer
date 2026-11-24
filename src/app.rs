@@ -1,6 +1,7 @@
-//! The window of HeMiMizer, as simple as the author wants it: it asks for the password of the NAS (which is also
-//! the start – nothing runs before Run is clicked), then shows the step it is on, out of how many, what it is doing
-//! and what failed; at the end what is left to do by hand and a restart.
+//! The window of HeMiMizer: the first page (back up, set up, the tools), the wizard, the backup, the start dialog of
+//! the setup (license terms, AMD installers, the password for the network drives – nothing runs before Run is
+//! clicked), then the step it is on, out of how many, what it is doing and what failed; at the end what is left to do
+//! by hand and a restart.
 
 use crate::i18n::tr;
 use crate::steps::{self, Event, Step};
@@ -25,7 +26,7 @@ const RESTART_DELAY: u64 = 20;
 /// How HeMiMizer was started.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Mode {
-    /// Asks for the NAS password and runs everything.
+    /// The first page, the wizard and the setup.
     Normal,
     /// `--resume`: the steps left before the restart, at once.
     Resume,
@@ -60,7 +61,7 @@ enum Phase {
     /// The backup runs, then its result.
     BackingUp,
     BackedUp,
-    /// The start dialog of the setup (drivers, NAS password, Run / Close).
+    /// The start dialog of the setup (license terms, AMD installers, the password for the network drives, Run / Close).
     Start,
     Running,
     Finished,
@@ -83,9 +84,9 @@ enum Action {
     /// the browser: one or none
     Browser(Option<&'static str>),
     Offline(bool),
-    /// the licence terms accepted or not (at the setup)
+    /// the license terms accepted or not (at the setup)
     Accept(bool),
-    /// the programs with licence terms left out (at the setup)
+    /// the programs with license terms left out (at the setup)
     DropLicensed,
     /// a page of the wizard already visited (the steps on top)
     GoPage(Page),
@@ -433,7 +434,7 @@ impl HeMiMizerApp {
         }
     }
 
-    /// Light / dark or the accent colour changed (in Windows or in HeMiDock): the new colours at once.
+    /// Light / dark or the accent color changed (in Windows or in HeMiDock): the new colours at once.
     fn follow_theme(&mut self, ctx: &egui::Context) {
         if self.theme_checked.elapsed() < Duration::from_secs(2) {
             return;
@@ -544,7 +545,7 @@ impl HeMiMizerApp {
         };
         value(ui, "Author", "Richard Hemala");
         value(ui, "Version", env!("CARGO_PKG_VERSION"));
-        let items = [("Project on GitHub", REPO), ("Report a problem", ""), ("Log", "HeMiMizer.log"), ("Licences", "")];
+        let items = [("Project on GitHub", REPO), ("Report a problem", ""), ("Log", "HeMiMizer.log"), ("Licenses", "")];
         if let Some(i) = card(ui, &p, |ui| crate::widgets::button_row(ui, &p, &items)) {
             acts.push(match i {
                 0 => Action::Open(REPO.into()),
@@ -642,7 +643,7 @@ impl HeMiMizerApp {
             ui,
             glyph::SAVE,
             "Back up this PC",
-            "Before reinstalling: choose what the new Windows gets, and save your settings (and the installers, if you like) into the folder of HeMiMizer.",
+            "Before reinstalling: choose what the new Windows gets, and save your settings (and the installers, if you like) into HeMiMizer's folder.",
             Action::StartWizard(true),
             acts,
         );
@@ -691,7 +692,7 @@ impl HeMiMizerApp {
         );
     }
 
-    /// A small rounded tile with an icon in the accent colour.
+    /// A small rounded tile with an icon in the accent color.
     fn icon_tile(ui: &mut egui::Ui, p: &Palette, g: char, size: f32) {
         let (r, _) = ui.allocate_exact_size(vec2(size, size), egui::Sense::hover());
         ui.painter().rect_filled(r, 7, theme::mix(p.card, p.accent, 0.20));
@@ -793,7 +794,7 @@ impl HeMiMizerApp {
         }
     }
 
-    /// The pages of this wizard: the settings and own folders only before a backup. (The licence terms are accepted
+    /// The pages of this wizard: the settings and own folders only before a backup. (The license terms are accepted
     /// at the setup, when the programs are installed.)
     fn pages(&self) -> Vec<Page> {
         let mut v = vec![Page::Hardware, Page::Browser, Page::Apps, Page::Windows];
@@ -807,7 +808,7 @@ impl HeMiMizerApp {
 
     fn page_title(&self, page: Page) -> &'static str {
         match page {
-            Page::Hardware => "Drivers and the software of the maker",
+            Page::Hardware => "Drivers and the PC maker's software",
             Page::Browser => "Browser",
             Page::Apps => "Programs",
             Page::Windows => "What changes in Windows",
@@ -850,7 +851,7 @@ impl HeMiMizerApp {
         ui.add_space(10.0);
         card(ui, &p, |ui| {
             ui.add_space(4.0);
-            ui.label(RichText::new("Password of the backup").size(14.0).color(p.text));
+            ui.label(RichText::new("Backup password").size(14.0).color(p.text));
             ui.add_space(6.0);
             let r = ui.add_enabled(
                 state != Some(None),
@@ -1057,7 +1058,7 @@ impl HeMiMizerApp {
                     None => {
                         ui.horizontal(|ui| {
                             ui.add(egui::Spinner::new().size(14.0).color(p.accent_text));
-                            ui.label(RichText::new("Finding out the hardware of this PC…").size(13.0).color(p.text2));
+                            ui.label(RichText::new("Detecting the hardware of this PC…").size(13.0).color(p.text2));
                         });
                         ui.add_space(10.0);
                     }
@@ -1076,7 +1077,7 @@ impl HeMiMizerApp {
                 if !shown.is_empty() {
                     ui.add_space(14.0);
                     let laptop = hw.is_some_and(|h| h.laptop);
-                    section(ui, &p, if laptop { "Software of the maker of this laptop" } else { "Software of the maker" });
+                    section(ui, &p, if laptop { "Software from the maker of this laptop" } else { "Software from the PC maker" });
                     for item in shown {
                         let tags: Vec<(String, Color32)> = if tools.contains(&item.id) { vec![("For this PC".into(), p.accent_text)] } else { Vec::new() };
                         if Self::choice_card(ui, &p, Some(glyph::PC), item.name, item.line, &tags, self.plan.has(item.id)) {
@@ -1162,7 +1163,7 @@ impl HeMiMizerApp {
                 self.backup_page(ui, acts);
             }
             Page::Folders => {
-                intro(ui, "Folders of yours to copy into the backup – they are put back to the same place on the new PC. The folders of the profile (Documents, Pictures…) go into the profile of the new user.");
+                intro(ui, "Your own folders to copy into the backup – they are put back in the same place on the new PC. Profile folders (Documents, Pictures…) go into the new user's profile.");
                 let mut remove = None;
                 for (i, f) in self.plan.folders.iter().enumerate() {
                     card(ui, &p, |ui| {
@@ -1205,7 +1206,7 @@ impl HeMiMizerApp {
         ui.add_space(10.0);
         let active = self.active_preset();
         let presets: Vec<(u8, &str, char, &str)> = [
-            (0u8, "Recommended", glyph::LIKE, "What most people want: clean-up, privacy and updates on – the look of Windows stays as it comes."),
+            (0u8, "Recommended", glyph::LIKE, "What most people want: cleanup, privacy and updates on – the look of Windows stays as it comes."),
             (1, "Like this PC", glyph::PC, "Every setting Windows lets HeMiMizer read is set as it is on this PC now – the new Windows looks and behaves the same."),
             (2, "Change nothing", glyph::CLOSE, "Windows stays as it comes – HeMiMizer only installs."),
         ]
@@ -1327,7 +1328,7 @@ impl HeMiMizerApp {
             "wallpaper" => "On the desktop and the lock screen",
             "pins" => "Start and the taskbar",
             "defender" => "The protection settings and exclusions",
-            "appearance" => "Dark mode and the accent colour",
+            "appearance" => "Dark mode and the accent color",
             "explorer" => "File extensions, hidden files and the view",
             "mouse" => "Pointer speed, scrolling and double-click speed",
             "wifi" => "The saved networks with their passwords – only into a backup with a password",
@@ -1431,7 +1432,7 @@ impl HeMiMizerApp {
                         Self::icon_tile(ui, &p, glyph::SAVE, 32.0);
                         ui.add_space(8.0);
                         let (title, line, color) = match &state {
-                            None => ("Pack it into one .zip?", "One file is easier to copy to another drive. HeMiMizer unpacks it by itself when it lies next to it.".to_string(), p.text2),
+                            None => ("Pack it into one .zip?", "One file is easier to copy to another drive. HeMiMizer unpacks it by itself when the .zip is next to HeMiMizer.exe.".to_string(), p.text2),
                             Some(None) => ("Packing…", String::new(), p.text2),
                             Some(Some(Ok(t))) => ("Packed", t.clone(), p.text2),
                             Some(Some(Err(e))) => ("Not packed", e.clone(), p.critical),
@@ -1581,7 +1582,7 @@ impl HeMiMizerApp {
             card(ui, &p, |ui| {
                 ui.add(
                     egui::Label::new(
-                        RichText::new("Encrypts your settings, Wi-Fi passwords, the settings of programs and your folders (AES-256). HeMiMizer asks for it on the new PC. Empty: not protected.")
+                        RichText::new("Encrypts your settings, Wi-Fi passwords, program settings and your folders (AES-256). HeMiMizer asks for it on the new PC. Empty: not protected.")
                             .size(12.0)
                             .color(p.text2),
                     )
@@ -1595,13 +1596,13 @@ impl HeMiMizerApp {
             if self.seal_pw != self.seal_pw2 && !self.seal_pw2.is_empty() {
                 ui.label(RichText::new("The two passwords are not the same.").size(12.0).color(p.critical));
             } else if self.wifi_on() && self.seal_pw.is_empty() {
-                ui.label(RichText::new("The Wi-Fi passwords go only into a protected backup – set a password, or leave out Wi-Fi networks on the page Take along.").size(12.0).color(p.caution));
+                ui.label(RichText::new("The Wi-Fi passwords go only into a protected backup – set a password, or leave out Wi-Fi networks on the Take along page.").size(12.0).color(p.caution));
             } else if !self.seal_pw.is_empty() {
                 ui.label(RichText::new("Keep the password safe – without it the backup cannot be opened.").size(12.0).color(p.text3));
             }
             ui.add_space(14.0);
         }
-        section(ui, &p, "Name of the PC");
+        section(ui, &p, "PC name");
         card(ui, &p, |ui| {
             row_layout(ui, 36.0, |ui| {
                 ui.vertical(|ui| {
@@ -1620,7 +1621,7 @@ impl HeMiMizerApp {
         section(ui, &p, "To install");
         if items.is_empty() {
             card(ui, &p, |ui| {
-                ui.label(RichText::new("Nothing – only the settings of Windows.").size(13.0).color(p.text2));
+                ui.label(RichText::new("Nothing – only Windows settings.").size(13.0).color(p.text2));
             });
         } else {
             ui.horizontal_wrapped(|ui| {
@@ -1635,13 +1636,13 @@ impl HeMiMizerApp {
         if !self.plan.licensed().is_empty() {
             ui.add_space(8.0);
             let names: Vec<&str> = self.plan.licensed().iter().map(|i| i.name).collect();
-            ui.add(egui::Label::new(RichText::new(format!("Licence terms of {} are shown at the setup, before they are installed.", names.join(", "))).size(12.0).color(p.text3)).wrap());
+            ui.add(egui::Label::new(RichText::new(format!("The license terms of {} are shown during setup, before they are installed.", names.join(", "))).size(12.0).color(p.text3)).wrap());
         }
         // where each new program goes: only what is ticked here is done
         let progs = crate::shortcuts::programs(&self.plan);
         if !progs.is_empty() {
             ui.add_space(14.0);
-            section(ui, &p, "Shortcuts and start");
+            section(ui, &p, "Shortcuts and startup");
             ui.add(
                 egui::Label::new(
                     RichText::new("Where the new programs go. Desktop not ticked: the shortcut its installer puts there is removed. Start with Windows not ticked: it does not start by itself.")
@@ -1697,13 +1698,13 @@ impl HeMiMizerApp {
         resp.clicked()
     }
 
-    /// Before the run: the licence terms of the programs, the installers of the drivers, the password of the NAS, Run.
+    /// Before the run: the license terms of the programs, the installers of the drivers, the password of the NAS, Run.
     fn start_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
         let (tone, text) = if self.offline > 0 {
-            (Tone::Success, tr("Installers from the backup: {n} – programs are installed offline.", "Instalačky ze zálohy: {n} – programy se nainstalují offline.").replace("{n}", &self.offline.to_string()))
+            (Tone::Success, tr("Installers from the backup: {n} – programs are installed offline.", "Instalační programy ze zálohy: {n} – programy se nainstalují offline.").replace("{n}", &self.offline.to_string()))
         } else {
-            (Tone::Caution, tr("No installers from a backup – the programs are downloaded after the internet is connected.", "Žádné instalačky ze zálohy – programy se stáhnou po připojení k internetu.").to_string())
+            (Tone::Caution, tr("No installers from a backup – the programs are downloaded after the internet is connected.", "Žádné instalační programy ze zálohy – programy se stáhnou po připojení k internetu.").to_string())
         };
         info_bar(ui, &p, tone, &text, None);
         ui.add_space(10.0);
@@ -1732,15 +1733,15 @@ impl HeMiMizerApp {
         }
         let licensed = self.plan.licensed();
         if !licensed.is_empty() {
-            section(ui, &p, "Licence terms");
-            ui.add(egui::Label::new(RichText::new("These programs have their own licence terms. HeMiMizer installs them only when you accept them – or leave them out.").size(12.0).color(p.text2)).wrap());
+            section(ui, &p, "License terms");
+            ui.add(egui::Label::new(RichText::new("These programs have their own license terms. HeMiMizer installs them only when you accept them – or leave them out.").size(12.0).color(p.text2)).wrap());
             ui.add_space(6.0);
             for item in &licensed {
                 card(ui, &p, |ui| {
                     row_layout(ui, 30.0, |ui| {
                         ui.label(RichText::new(item.name).size(14.0).color(p.text));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if Btn::new("Licence terms").icon(glyph::OPEN_LINK).subtle().show(ui, &p).clicked() {
+                            if Btn::new("License terms").icon(glyph::OPEN_LINK).subtle().show(ui, &p).clicked() {
                                 acts.push(Action::Open(item.license.to_string()));
                             }
                         });
@@ -1748,7 +1749,7 @@ impl HeMiMizerApp {
                 });
             }
             ui.add_space(6.0);
-            if Self::choice_card(ui, &p, None, "I accept the licence terms of all programs above", "Needed to install them", &[], self.plan.accepted) {
+            if Self::choice_card(ui, &p, None, "I accept the license terms of all programs above", "Needed to install them", &[], self.plan.accepted) {
                 acts.push(Action::Accept(!self.plan.accepted));
             }
             ui.add_space(4.0);
@@ -1803,7 +1804,7 @@ impl HeMiMizerApp {
         }
     }
 
-    /// Run can start: no licence terms to accept, or accepted.
+    /// Run can start: no license terms to accept, or accepted.
     fn licences_ok(&self) -> bool {
         self.plan.licensed().is_empty() || self.plan.accepted
     }
@@ -1816,7 +1817,7 @@ impl HeMiMizerApp {
             ui,
             &p,
             Tone::Caution,
-            tr("These installers could not be downloaded.", "Tyto instalačky se nepodařilo stáhnout."),
+            tr("These installers could not be downloaded.", "Tyto instalační programy se nepodařilo stáhnout."),
             None,
         );
         ui.add_space(8.0);
@@ -1826,7 +1827,7 @@ impl HeMiMizerApp {
                 ui.label(RichText::new(name.as_str()).font(theme::semibold(14.0)).color(p.text));
                 ui.add(egui::Label::new(RichText::new(err.as_str()).size(12.0).color(p.text2)).wrap());
                 ui.add_space(6.0);
-                if Self::path_row(ui, &p, path, tr("The installer downloaded by hand", "Instalačka stažená ručně")) {
+                if Self::path_row(ui, &p, path, tr("The installer downloaded by hand", "Instalační program stažený ručně")) {
                     acts.push(Action::BrowseFile(i));
                 }
                 ui.add_space(4.0);
@@ -1898,17 +1899,17 @@ impl HeMiMizerApp {
             (
                 Tone::Caution,
                 tr(
-                    "The drivers are installed – the PC restarts and HeMiMizer continues after the sign-in.",
+                    "The drivers are installed – the PC restarts and HeMiMizer continues after you sign in.",
                     "Ovladače jsou nainstalované – PC se restartuje a HeMiMizer po přihlášení pokračuje.",
                 )
                 .to_string(),
             )
         } else if self.failures.is_empty() {
-            (Tone::Success, tr("Done – all {n} steps went well.", "Hotovo – všech {n} kroků proběhlo v pořádku.").replace("{n}", &total.to_string()))
+            (Tone::Success, tr("Done – all {n} steps went well.", crate::i18n::plural(total, "Hotovo – krok proběhl v pořádku.", "Hotovo – všechny {n} kroky proběhly v pořádku.", "Hotovo – všech {n} kroků proběhlo v pořádku.")).replace("{n}", &total.to_string()))
         } else {
             (
                 Tone::Caution,
-                tr("Done – {f} of {n} steps failed.", "Hotovo – {f} z {n} kroků selhalo.")
+                tr("Done – {f} of {n} steps failed.", "Hotovo – selhalo kroků: {f} z {n}.")
                     .replace("{f}", &self.failures.len().to_string())
                     .replace("{n}", &total.to_string()),
             )
@@ -1920,7 +1921,7 @@ impl HeMiMizerApp {
         }
         ui.add_space(8.0);
         let bye = if steps::removes_data() {
-            "When you press Done, HeMiMizer removes itself – nothing of it stays on this PC (HeMiMizer.exe goes at the next restart). Note what is left to do below first."
+            "When you press Done, HeMiMizer removes itself from this PC (HeMiMizer.exe is deleted at the next restart). Note what is left to do below first."
         } else {
             "When you press Done, HeMiMizer removes everything it put on this PC. It stays on its drive with the backup, for the next time."
         };
@@ -2073,7 +2074,7 @@ impl HeMiMizerApp {
                 }
                 // the end: Done closes HeMiMizer and removes it (nothing of it stays); Try again runs the failed steps once more
                 Phase::Finished if self.restart_at.is_none() && !self.resume_pending => {
-                    if Btn::new("Done").icon(glyph::COMPLETED).accent().tip("Closes HeMiMizer and removes it – nothing of it stays on the PC").show(ui, &p).clicked() {
+                    if Btn::new("Done").icon(glyph::COMPLETED).accent().tip("Closes HeMiMizer and removes it from this PC").show(ui, &p).clicked() {
                         acts.push(Action::Done);
                     }
                     if !self.failed_steps.is_empty() && Btn::new("Try again").icon(glyph::RESTART).tip("Runs only the steps that failed once more").show(ui, &p).clicked() {
@@ -2102,7 +2103,7 @@ impl HeMiMizerApp {
                 ui.label(RichText::new(tr("Restart the PC?", "Restartovat PC?")).font(theme::semibold(20.0)).color(p.text));
                 ui.add_space(12.0);
                 let t = tr(
-                    "Some changes (the name of the PC, Windows features, scaling, memory integrity) take effect after a restart.",
+                    "Some changes (the PC name, Windows features, scaling, memory integrity) take effect after a restart.",
                     "Některé změny (název PC, funkce Windows, měřítko, integrita paměti) se projeví až po restartu.",
                 );
                 ui.add(egui::Label::new(RichText::new(t).size(14.0).color(p.text)).wrap());
@@ -2204,7 +2205,7 @@ impl HeMiMizerApp {
                 }
                 Action::Pick(id, on) => {
                     self.plan.set(id, on);
-                    // a program with licence terms added: they are to be accepted again
+                    // a program with license terms added: they are to be accepted again
                     if on && crate::catalog::find(id).is_some_and(|i| !i.license.is_empty()) {
                         self.plan.accepted = false;
                     }
@@ -2503,7 +2504,7 @@ impl HeMiMizerApp {
 
 /// The Open dialog of Windows for an installer (.exe / .msi), starting in the folder of `current`.
 fn pick_exe(current: &str) -> Option<String> {
-    let mut d = rfd::FileDialog::new().set_title(tr("Choose the installer", "Vyber instalačku")).add_filter(tr("Installers", "Instalačky"), &["exe", "msi"]);
+    let mut d = rfd::FileDialog::new().set_title(tr("Choose the installer", "Vyber instalační program")).add_filter(tr("Installers", "Instalační programy"), &["exe", "msi"]);
     if let Some(dir) = std::path::Path::new(current.trim()).parent().filter(|d| d.is_dir()) {
         d = d.set_directory(dir);
     } else if let Some(dir) = config::dir().parent() {
@@ -2529,7 +2530,7 @@ impl eframe::App for HeMiMizerApp {
             let _ = sys::exec("shutdown.exe", &["/r", "/t", "0"]);
         }
         // closing in the middle of the work would leave a half-installed program
-        // the last run is over: HeMiMizer removes itself when the window closes (only the log and the to-do file stay)
+        // the last run is over: HeMiMizer removes itself when the window closes (a Debug build keeps its log)
         if ctx.input(|i| i.viewport().close_requested()) && self.phase == Phase::Finished && !self.resume_pending && !self.removed {
             self.removed = true;
             steps::remove_myself();

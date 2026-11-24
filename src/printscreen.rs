@@ -44,7 +44,7 @@ unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> L
             let k = &*(lparam as *const KBDLLHOOKSTRUCT);
             if k.vkCode == VK_SNAPSHOT && ours_in_front() {
                 // as the user, not as administrator: File Explorer opens the link
-                let _ = std::process::Command::new("explorer.exe").arg("ms-screenclip:").spawn();
+                let _ = std::process::Command::new(crate::sys::program("explorer.exe")).arg("ms-screenclip:").spawn();
             }
         }
         CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)

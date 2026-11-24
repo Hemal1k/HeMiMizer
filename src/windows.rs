@@ -1,4 +1,4 @@
-//! The settings of Windows as on the PC of the author.
+//! The Windows steps: the settings chosen in the wizard and the ones taken along in the backup.
 
 use crate::config;
 use crate::i18n::tr;
@@ -97,7 +97,9 @@ pub fn explorer(_c: &Ctx) -> Res {
     if !config::has("explorer-view.reg") {
         return Ok(config::not_backed_up());
     }
-    sys::reg_import(&config::text("explorer-view.reg", true))?;
+    // only the keys the backup takes (audit 2026-11-24)
+    let keys: Vec<&str> = config::EXPLORER_VALUES.iter().map(|(k, _)| *k).collect();
+    sys::reg_import_under(&config::text("explorer-view.reg", true), &keys)?;
     Ok(String::new())
 }
 
@@ -148,24 +150,54 @@ foreach ($u in $list) { "TITLE=$($u.Title)" }
     }
 }
 
-// ---------------------------------------------------------------- colours, language, File Explorer view
+// ---------------------------------------------------------------- colors, File Explorer view
 
-/// Dark mode and the accent colour as captured, Czech only (keyboard, formats), the time zone of Prague.
+/// Dark mode and the accent color as captured in the backup (appearance.reg).
 pub fn appearance(_c: &Ctx) -> Res {
     if config::has("appearance.reg") {
-        sys::reg_import(&config::text("appearance.reg", true))?;
+        let keys: Vec<&str> = config::APPEARANCE_VALUES.iter().map(|(k, _)| *k).collect();
+        sys::reg_import_under(&config::text("appearance.reg", true), &keys)?;
     }
     sys::settings_changed();
-    Ok(if config::has("appearance.reg") { tr("Colours from the backup", "Barvy ze zálohy").into() } else { config::not_backed_up() })
+    Ok(if config::has("appearance.reg") { tr("Colors from the backup", "Barvy ze zálohy").into() } else { config::not_backed_up() })
 }
 
 // ---------------------------------------------------------------- Defender
 
-/// Microsoft Defender as on the PC of the author (defender.txt: Get-MpPreference + memory integrity), then the
-/// exclusions: the Steam libraries (games load faster) and the files qBittorrent writes while downloading
-/// (a downloaded file is still scanned when it is opened).
+/// A value of defender.txt that would switch a protection of Defender off (or send nothing to Microsoft's cloud
+/// protection): not taken over from a backup (audit 2026-11-24). An old PC with a protection off – or an edited backup –
+/// must not switch it off on the new one without a word.
+pub fn weakens_defender(name: &str, value: &str) -> bool {
+    let truthy = value.eq_ignore_ascii_case("true") || value == "1";
+    match name {
+        // a performance switch, not a protection
+        "DisableCpuThrottleOnIdleScans" => false,
+        n if n.starts_with("Disable") => truthy,
+        "MAPSReporting" | "PUAProtection" | "EnableNetworkProtection" | "EnableControlledFolderAccess" => value == "0",
+        // 2 = never send samples
+        "SubmitSamplesConsent" => value == "2",
+        "MemoryIntegrity" => value == "0",
+        _ => false,
+    }
+}
+
+/// Microsoft Defender as on the PC of the backup (defender.txt: Get-MpPreference + memory integrity) – without the
+/// values that would switch a protection off, they are only named in the log of the step –, then the exclusions: the
+/// Steam libraries (games load faster) and, when qBittorrent is chosen in the wizard, the files it writes while
+/// downloading (a downloaded file is still scanned when it is opened).
 pub fn defender(c: &Ctx) -> Res {
-    let settings = config::defender();
+    let all = config::defender();
+    let (weak, settings): (Vec<_>, Vec<_>) = all.into_iter().partition(|(k, v)| weakens_defender(k, v));
+    if !weak.is_empty() {
+        c.log(format!(
+            "{} {}",
+            tr(
+                "Not taken over from the backup – they would switch protection off (change them in Windows Security if you want):",
+                "Ze zálohy nepřevzato – vypnulo by to ochranu (pokud chceš, změň to v Zabezpečení Windows):"
+            ),
+            weak.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(", ")
+        ));
+    }
     let mut failed = Vec::new();
     let mut set = 0;
     let quote = |s: &str| format!("'{}'", s.replace('\'', "''"));
@@ -197,6 +229,8 @@ pub fn defender(c: &Ctx) -> Res {
             if value.is_empty() {
                 continue;
             }
+            // the exclusions of the old PC: named in the log of the step, so that the user sees them
+            c.log(format!("{} {name}: {}", tr("From the backup:", "Ze zálohy:"), value.replace(';', ", ")));
             value.split(';').map(|v| quote(v)).collect::<Vec<_>>().join(",")
         } else if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") {
             format!("${}", value.to_lowercase())
@@ -231,44 +265,94 @@ pub fn defender(c: &Ctx) -> Res {
     paths.sort();
     paths.dedup();
     let list = paths.iter().map(|p| format!("'{}'", p.replace('\'', "''"))).collect::<Vec<_>>().join(",");
-    let qbit = format!(r"{}\qBittorrent\qbittorrent.exe", sys::env("ProgramFiles", r"C:\Program Files"));
+    // qBittorrent only when it was chosen in the wizard (audit 2026-11-24: the exclusion was added on every PC)
+    let qbit = crate::install::chosen("qbittorrent").then(|| format!(r"{}\qBittorrent\qbittorrent.exe", sys::env("ProgramFiles", r"C:\Program Files")));
+    let mut cmds = Vec::new();
+    if !paths.is_empty() {
+        cmds.push(format!("Add-MpPreference -ExclusionPath @({list})"));
+    }
+    if let Some(q) = &qbit {
+        cmds.push(format!("Add-MpPreference -ExclusionProcess '{}'", q.replace('\'', "''")));
+    }
     sys::ps(&format!(
-        "if (-not (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) {{ 'NODEFENDER'; return }}; \
-         Add-MpPreference -ExclusionPath @({list}) ; Add-MpPreference -ExclusionProcess '{qbit}'"
+        "if (-not (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) {{ 'NODEFENDER'; return }}; {}",
+        cmds.join("; ")
     ))
     .and_then(|o| if o.contains("NODEFENDER") { Err(tr("Defender is not in this Windows.", "Defender v tomto Windows není.").into()) } else { Ok(()) })?;
-    let mi = settings.iter().find(|(k, _)| k == "MemoryIntegrity").map(|(_, v)| v == "1");
+    // memory integrity is only switched on from a backup, never off
+    let mi = settings.iter().any(|(k, v)| k == "MemoryIntegrity" && v == "1");
+    let mut excluded = paths.clone();
+    if qbit.is_some() {
+        excluded.push("qBittorrent".into());
+    }
     Ok(format!(
-        "{} {set}{}{}; {}: {}, qBittorrent",
+        "{} {set}{}{}{}; {}: {}",
         tr("Settings:", "Nastavení:"),
         if failed.is_empty() { String::new() } else { format!(" ({} {})", tr("refused:", "odmítnuto:"), failed.len()) },
-        match mi {
-            Some(true) => tr(", memory integrity on", ", integrita paměti zapnutá"),
-            Some(false) => tr(", memory integrity off", ", integrita paměti vypnutá"),
-            None => "",
-        },
+        if mi { tr(", memory integrity on", ", integrita paměti zapnutá") } else { "" },
+        if weak.is_empty() { String::new() } else { format!(" ({} {})", tr("not taken over, would weaken protection:", "nepřevzato, oslabilo by ochranu:"), weak.len()) },
         tr("exclusions", "výjimky"),
-        paths.join(", ")
+        if excluded.is_empty() { "–".to_string() } else { excluded.join(", ") }
     ))
 }
 
-/// A Defender exclusion for HeMiMizer itself while it works (the user's wish): its folder, its work folders and
+/// A Defender exclusion for HeMiMizer itself while it works (the user's wish): the program file, its work folders and
 /// its process. Defender's machine learning stopped it in the middle of a run (Trojan:Win32/Bearfoos.A!ml) and
 /// left Windows half set up. Removed again at the end of the run (kept while a restart is pending).
+///
+/// Only HeMiMizer.exe itself, not the folder it lies in (that was often the whole Downloads folder), and every exclusion
+/// added is written down: after a restart HeMiMizer may run from another place, and the end of the run removes all of
+/// them by the list, not just the ones of the current path (audit 2026-11-24: the first ones stayed for good).
 pub fn self_exclusion(on: bool) {
     let exe = std::env::current_exe().map(|e| e.display().to_string()).unwrap_or_default();
     let mut paths = vec![sys::work_dir().display().to_string(), std::env::temp_dir().join("HeMiMizer").display().to_string()];
-    if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.display().to_string())) {
-        paths.push(d);
+    if !exe.is_empty() {
+        paths.push(exe.clone());
     }
-    paths.push(std::path::PathBuf::from(sys::env("LOCALAPPDATA", "")).join(r"HeMiMizer\app").display().to_string());
-    let list = paths.iter().map(|p| format!("'{}'", p.replace('\'', "''"))).collect::<Vec<_>>().join(",");
+    paths.push(sys::state_dir().join("app").display().to_string());
+    let mut processes = vec![exe];
+    // in the protected folder: a list a program of the user could write would add its own exclusions here
+    let record = sys::state_dir().join("defender-exclusions.txt");
+    let old_record = std::path::PathBuf::from(sys::env("LOCALAPPDATA", "")).join(r"HeMiMizer\defender-exclusions.txt");
+    // the earlier ones (also of a run before a restart): "path<TAB>…" and "process<TAB>…" lines; the list of the
+    // version before (in %LOCALAPPDATA%) only to take its exclusions away again
+    let mut earlier = std::fs::read_to_string(&record).unwrap_or_default();
+    if !on {
+        earlier.push_str(&std::fs::read_to_string(&old_record).unwrap_or_default());
+        paths.push(std::path::PathBuf::from(sys::env("LOCALAPPDATA", "")).join(r"HeMiMizer\app").display().to_string());
+    }
+    for line in earlier.lines() {
+        match line.split_once('\t') {
+            Some(("path", p)) if !paths.iter().any(|q| q.eq_ignore_ascii_case(p)) => paths.push(p.to_string()),
+            Some(("process", p)) if !processes.iter().any(|q| q.eq_ignore_ascii_case(p)) => processes.push(p.to_string()),
+            _ => {}
+        }
+    }
+    // HeMiMizer up to 1.5.0 excluded the whole folder of the exe: taken away too (removing a missing one does nothing)
+    if !on {
+        if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.display().to_string())) {
+            paths.push(d);
+        }
+    }
+    paths.retain(|p| !p.is_empty());
+    processes.retain(|p| !p.is_empty());
+    if on {
+        let _ = std::fs::create_dir_all(record.parent().unwrap_or(std::path::Path::new(".")));
+        let text: String = paths.iter().map(|p| format!("path\t{p}\n")).chain(processes.iter().map(|p| format!("process\t{p}\n"))).collect();
+        let _ = std::fs::write(&record, text);
+    }
+    let quote = |v: &[String]| v.iter().map(|p| format!("'{}'", p.replace('\'', "''"))).collect::<Vec<_>>().join(",");
     let verb = if on { "Add" } else { "Remove" };
-    let _ = sys::ps(&format!(
+    let r = sys::ps(&format!(
         "if (Get-Command {verb}-MpPreference -ErrorAction SilentlyContinue) {{ \
-         try {{ {verb}-MpPreference -ExclusionPath @({list}) -ExclusionProcess '{}' }} catch {{ \"failed: $_\" }} }}",
-        exe.replace('\'', "''")
+         try {{ {verb}-MpPreference -ExclusionPath @({}) -ExclusionProcess @({}) }} catch {{ \"failed: $_\" }} }}",
+        quote(&paths),
+        quote(&processes)
     ));
+    if !on && r.is_ok_and(|t| !t.contains("failed:")) {
+        let _ = std::fs::remove_file(&record);
+        let _ = std::fs::remove_file(&old_record);
+    }
 }
 
 // ---------------------------------------------------------------- Microsoft Store
@@ -287,7 +371,7 @@ pub fn store_updates(c: &Ctx) -> Res {
     )
     .unwrap_or_default();
     if out.contains("STARTED") {
-        return Ok(tr("Store updates run in the background", "Aktualizace Storu běží na pozadí").into());
+        return Ok(tr("Microsoft Store updates run in the background", "Aktualizace z Microsoft Storu běží na pozadí").into());
     }
     // winget (App Installer) – started and left running
     let winget = std::path::PathBuf::from(sys::env("LOCALAPPDATA", "")).join(r"Microsoft\WindowsApps\winget.exe");
@@ -299,7 +383,7 @@ pub fn store_updates(c: &Ctx) -> Res {
             .spawn();
         sys::log(&format!("winget upgrade (msstore) started: {}", r.is_ok()));
         if r.is_ok() {
-            return Ok(tr("Store updates run in the background (winget)", "Aktualizace Storu běží na pozadí (winget)").into());
+            return Ok(tr("Microsoft Store updates run in the background (winget)", "Aktualizace z Microsoft Storu běží na pozadí (winget)").into());
         }
     }
     Err(format!("{}: {}", tr("Microsoft Store did not start the updates", "Microsoft Store nespustil aktualizace"), out.trim()))
@@ -312,7 +396,7 @@ pub fn store_updates(c: &Ctx) -> Res {
 pub fn pins(c: &Ctx) -> Res {
     let tar = config::bytes("pins.tar");
     if tar.is_empty() {
-        return Ok(tr("Nothing captured", "Nic zachyceno").into());
+        return Ok(tr("Nothing captured", "Nic se nezachytilo").into());
     }
     let tmp = sys::work_dir().join("pins");
     let _ = std::fs::remove_dir_all(&tmp);
@@ -350,7 +434,7 @@ pub fn pins(c: &Ctx) -> Res {
     crate::programs::fix_shortcuts(&bar)?;
     sys::delete_tree(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband");
     if let Ok(t) = std::fs::read_to_string(tmp.join("taskband.reg")) {
-        sys::reg_import(&t)?;
+        sys::reg_import_under(&t, &[config::TASKBAND])?;
     }
     let _ = std::fs::remove_dir_all(&tmp);
     // Windows restarts File Explorer by itself (AutoRestartShell), as the user – never start it from here (elevated)
@@ -452,12 +536,16 @@ Delete-DeliveryOptimizationCache -Force -ErrorAction SilentlyContinue
     c.log(tr("Cleaning up the component store (takes a few minutes)", "Čistím úložiště součástí (trvá pár minut)"));
     sys::run("dism.exe", &["/online", "/cleanup-image", "/startcomponentcleanup", "/quiet"])?;
 
-    // Disk Clean-up with every item ticked (incl. the system files): each handler under VolumeCaches gets the
-    // flag of the set 99, which cleanmgr /sagerun:99 then runs on every drive (HeMiMizer runs as administrator)
-    c.log(tr("Disk Clean-up with all items (can take long)", "Vyčištění disku se všemi položkami (může trvat dlouho)"));
+    // Disk Clean-up with the system files: each handler under VolumeCaches gets the flag of the set 99, which
+    // cleanmgr /sagerun:99 then runs on every drive (HeMiMizer runs as administrator) – except the ones that delete the
+    // user's own files or the way back: Downloads, the Recycle Bin, the previous Windows (Windows.old) and the versions
+    // of File History (audit 2026-11-24: they were all ticked); their flag of an earlier run is taken away
+    c.log(tr("Disk Cleanup (can take a while)", "Vyčištění disku (může trvat dlouho)"));
     sys::ps(
-        "Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VolumeCaches' | \
-         ForEach-Object { New-ItemProperty -Path $_.PSPath -Name StateFlags0099 -Value 2 -PropertyType DWord -Force | Out-Null }",
+        "$keep = 'DownloadsFolder','Recycle Bin','Previous Installations','User file versions'\r\n\
+         Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VolumeCaches' | ForEach-Object { \
+           if ($keep -contains $_.PSChildName) { Remove-ItemProperty -Path $_.PSPath -Name StateFlags0099 -ErrorAction SilentlyContinue } \
+           else { New-ItemProperty -Path $_.PSPath -Name StateFlags0099 -Value 2 -PropertyType DWord -Force | Out-Null } }",
     )?;
     let _ = sys::exec("cleanmgr.exe", &["/sagerun:99"]);
     // cleanmgr hands part of the work to child processes – wait until none is left
@@ -534,7 +622,7 @@ pub fn display(c: &Ctx) -> Res {
     }
     // the scaling (Settings → Display → Scale) per monitor; Windows applies it at the next sign-in
     if config::has("display-scaling.reg") {
-        sys::reg_import(&config::text("display-scaling.reg", true))?;
+        sys::reg_import_under(&config::text("display-scaling.reg", true), &[r"HKEY_CURRENT_USER\Control Panel\Desktop\PerMonitorSettings"])?;
         c.reboot();
     }
     Ok(done.join(", "))
@@ -659,6 +747,14 @@ pub fn wifi(c: &Ctx) -> Res {
 }
 
 /// The fonts of the backup into Windows\Fonts, registered for all users.
+/// The file of a line of fonts.txt: a plain file name (nothing before it, not "." or "..") of a font.
+pub fn font_file_ok(file: &str) -> bool {
+    let p = std::path::Path::new(file);
+    let plain = !file.contains(['\\', '/', ':']) && p.file_name().is_some_and(|f| f == std::ffi::OsStr::new(file));
+    let font = p.extension().is_some_and(|e| ["ttf", "otf", "ttc", "otc", "fon", "fnt"].iter().any(|x| e.eq_ignore_ascii_case(x)));
+    plain && font
+}
+
 pub fn fonts(c: &Ctx) -> Res {
     use windows_sys::Win32::Graphics::Gdi::AddFontResourceW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_FONTCHANGE};
@@ -670,6 +766,11 @@ pub fn fonts(c: &Ctx) -> Res {
     let (mut n, mut failed) = (0, Vec::new());
     for line in list.lines().filter(|l| !l.trim().is_empty()) {
         let Some((name, file)) = line.split_once('|') else { continue };
+        // only a plain name of a font file: no folder, no "..", no other place (audit 2026-11-24)
+        if !font_file_ok(file) {
+            failed.push(format!("{file}: {}", tr("not a font file name – skipped", "není název souboru písma – přeskočeno")));
+            continue;
+        }
         let to = win_fonts.join(file);
         if !to.exists() {
             if let Err(e) = std::fs::copy(dir.join(file), &to) {

@@ -167,7 +167,30 @@ pub fn drives() -> Vec<Drive> {
                 ip: p.get(4).unwrap_or(&"").to_string(),
             })
         })
+        // the share goes into net use and a command line of cmd: a line that is not a plain drive is left out
+        .filter(|d| {
+            let ok = valid_drive(d);
+            if !ok {
+                sys::log(&format!("network-drives.txt: left out, not a valid drive: {}|{}|{}", d.letter, d.share, d.ip));
+            }
+            ok
+        })
         .collect()
+}
+
+/// A drive of network-drives.txt that is safe to map: one letter, a share `\\server\folder…` with a server name of
+/// letters, digits, dots, hyphens and underscores and no character that means something to cmd or PowerShell, and an
+/// IPv4 address (or none).
+pub fn valid_drive(d: &Drive) -> bool {
+    let letter = d.letter.len() == 1 && d.letter.chars().all(|c| c.is_ascii_uppercase());
+    let share = d.share.strip_prefix(r"\\").and_then(|r| r.split_once('\\')).is_some_and(|(server, path)| {
+        !server.is_empty()
+            && server.chars().all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
+            && !path.trim_matches('\\').is_empty()
+            && !path.chars().any(|c| c.is_control() || "\"&|<>^%!".contains(c))
+    });
+    let ip = d.ip.is_empty() || d.ip.parse::<std::net::Ipv4Addr>().is_ok();
+    letter && share && ip
 }
 
 pub fn brave_extensions() -> Vec<String> {
@@ -200,9 +223,9 @@ pub fn parts() -> Vec<Part> {
         ("pins", tr("Pinned in Start and on the taskbar", "Připnuté ve Startu a na hlavním panelu"), cap_pins),
         ("hemidock", "HeMiDock", cap_hemidock),
         ("defender", "Microsoft Defender", cap_defender),
-        ("appearance", tr("Colours (dark mode, accent)", "Barvy (tmavý režim, zvýraznění)"), cap_appearance),
+        ("appearance", tr("Colors (dark mode, accent)", "Barvy (tmavý režim, zvýraznění)"), cap_appearance),
         ("explorer", tr("File Explorer view", "Zobrazení Průzkumníka"), cap_explorer),
-        ("steam", tr("Steam libraries", "Steam knihovny"), cap_steam),
+        ("steam", tr("Steam libraries", "Knihovny Steamu"), cap_steam),
         ("vlc", "VLC", cap_vlc),
         ("qbittorrent", "qBittorrent", cap_qbittorrent),
         ("brave", "Brave", cap_brave),
@@ -235,7 +258,7 @@ fn cap_wifi() -> Result<String, String> {
         let _ = std::fs::remove_dir_all(&to);
         return Err(o.text.trim().lines().last().unwrap_or("No Wi-Fi networks on this PC").to_string());
     }
-    Ok(format!("{n} {}", if n == 1 { "network" } else { "networks" }))
+    Ok(crate::i18n::count(n, ("network", "networks"), ("síť", "sítě", "sítí")))
 }
 
 // ---------------------------------------------------------------- fonts
@@ -287,7 +310,7 @@ fn cap_fonts() -> Result<String, String> {
     let to = dir().join("fonts");
     let _ = std::fs::remove_dir_all(&to);
     if found.is_empty() {
-        return Err("No fonts installed besides the ones of Windows".into());
+        return Err("No fonts installed besides those of Windows".into());
     }
     std::fs::create_dir_all(&to).map_err(|e| e.to_string())?;
     let mut lines = Vec::new();
@@ -300,12 +323,23 @@ fn cap_fonts() -> Result<String, String> {
         }
     }
     std::fs::write(to.join("fonts.txt"), lines.join("\r\n")).map_err(|e| e.to_string())?;
-    Ok(format!("{} fonts ({:.1} MB)", lines.len(), size as f64 / 1e6))
+    Ok(format!("{} ({} MB)", crate::i18n::count(lines.len(), ("font", "fonts"), ("písmo", "písma", "písem")), crate::i18n::dec1(size as f64 / 1e6)))
 }
 
-/// Takes the current settings of this PC into the config folder; one line per part (✓ or ✗).
+/// Takes the current settings of this PC into the config folder; one line per part (✓ or ✗). For `--capture`: no
+/// Wi-Fi – its passwords would lie readable next to the exe; they go only into a backup with a password, made in the
+/// window (audit 2026-11-24).
 pub fn capture() -> Vec<(String, Result<String, String>)> {
-    let mut out: Vec<(String, Result<String, String>)> = parts().iter().map(|(_, n, f)| (n.to_string(), f())).collect();
+    let mut out: Vec<(String, Result<String, String>)> = parts()
+        .iter()
+        .map(|(id, n, f)| {
+            if *id == "wifi" {
+                (n.to_string(), Err(tr("not saved – the Wi-Fi passwords go only into a protected backup (in the window)", "neuloženo – hesla Wi-Fi jdou jen do chráněné zálohy (v okně)").to_string()))
+            } else {
+                (n.to_string(), f())
+            }
+        })
+        .collect();
     out.push((tr("Folder", "Složka").to_string(), Ok(dir().display().to_string())));
     out
 }
@@ -465,7 +499,7 @@ fn cap_mouse() -> Result<String, String> {
 
 /// `reg export` of a key as text.
 fn reg_export(key: &str) -> Result<String, String> {
-    let f = std::env::temp_dir().join(format!("HeMiMizer-export-{}.reg", std::process::id()));
+    let f = sys::scripts_dir()?.join(format!("export-{}.reg", std::process::id()));
     sys::run("reg.exe", &["export", key, &f.display().to_string(), "/y"])?;
     let raw = std::fs::read(&f).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&f);
@@ -653,7 +687,7 @@ fn cap_defender() -> Result<String, String> {
          $dg = Get-CimInstance -Namespace root\\Microsoft\\Windows\\DeviceGuard -ClassName Win32_DeviceGuard -ErrorAction SilentlyContinue; \
          \"MemoryIntegrity=$([int]($dg.SecurityServicesConfigured -contains 2))\""
     ))?;
-    let mut lines = vec!["# Microsoft Defender as on the PC of the author (Get-MpPreference); MemoryIntegrity = Core isolation".to_string()];
+    let mut lines = vec!["# Microsoft Defender as on the PC this backup was made on (Get-MpPreference); MemoryIntegrity = Core isolation".to_string()];
     lines.extend(out.lines().map(|l| l.trim().to_string()).filter(|l| l.contains('=')));
     let n = lines.len() - 1;
     write("defender.txt", (lines.join("\r\n") + "\r\n").as_bytes())?;
@@ -693,7 +727,11 @@ fn cap_hemidock() -> Result<String, String> {
     let r = sys::run("tar.exe", &["-cf", &tar.display().to_string(), "-C", &stage.display().to_string(), "."]);
     let _ = std::fs::remove_dir_all(&stage);
     r?;
-    Ok(format!("{n} {}, {pins} {}", tr("files", "souborů"), tr("pinned shortcuts", "připnutých zástupců")))
+    Ok(format!(
+        "{}, {}",
+        crate::i18n::count(n, ("file", "files"), ("soubor", "soubory", "souborů")),
+        crate::i18n::count(pins, ("pinned shortcut", "pinned shortcuts"), ("připnutý zástupce", "připnutí zástupci", "připnutých zástupců"))
+    ))
 }
 
 /// The pins of Start (start2.bin) and of the taskbar (its shortcuts + the order in Taskband) into pins.tar.

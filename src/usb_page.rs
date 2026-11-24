@@ -185,7 +185,7 @@ impl HeMiMizerApp {
             });
             ui.label(
                 RichText::new(if u.ntfs {
-                    "NTFS: any size of the image fits; a small FAT32 part starts the PC."
+                    "NTFS: an image of any size fits; a small FAT32 partition starts the PC."
                 } else {
                     "FAT32: install.wim is split; an image with a file over 4 GB needs NTFS."
                 })
@@ -206,7 +206,7 @@ impl HeMiMizerApp {
         ui.add_space(10.0);
         section(ui, &p, "Installation of Windows");
         card(ui, &p, |ui| {
-            ui.checkbox(&mut u.bypass_hw, "No need of more than 4 GB RAM, Secure Boot and TPM 2.0");
+            ui.checkbox(&mut u.bypass_hw, "No check for 4 GB RAM, Secure Boot and TPM 2.0");
             ui.checkbox(&mut u.bypass_msa, "No Microsoft account required");
             ui.horizontal(|ui| {
                 ui.checkbox(&mut u.local, "A local account named");
@@ -222,7 +222,7 @@ impl HeMiMizerApp {
                         ui.horizontal(|ui| {
                             ui.add_space(24.0);
                             ui.add(egui::Spinner::new().size(12.0).color(p.accent_text));
-                            ui.label(RichText::new("Reading the regions of Windows…").size(12.0).color(p.text3));
+                            ui.label(RichText::new("Reading the Windows regions…").size(12.0).color(p.text3));
                         });
                     }
                     Some((cultures, zones, _)) => {
@@ -246,7 +246,7 @@ impl HeMiMizerApp {
                         });
                         ui.horizontal(|ui| {
                             ui.add_space(24.0);
-                            ui.label(RichText::new("The keyboard and the formats of the region; the language of Windows is the one of the ISO.").size(11.5).color(p.text3));
+                            ui.label(RichText::new("The keyboard and the formats of the region; the Windows language is the one in the ISO.").size(11.5).color(p.text3));
                         });
                     }
                 }

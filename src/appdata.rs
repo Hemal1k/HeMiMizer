@@ -48,7 +48,7 @@ pub const ALL: &[Data] = &[
     d("7zip", &[r"HKCU\Software\7-Zip"], &[], "Options and the context menu"),
     d("winrar", &[r"HKCU\Software\WinRAR"], &[], "Options"),
     d("notepadpp", &[r"{APPDATA}\Notepad++"], &["backup", "session.xml"], "Options, themes and plug-ins"),
-    d("powertoys", &[r"{LOCALAPPDATA}\Microsoft\PowerToys"], &["Logs", "Updates", "WinGet"], "The settings of every tool"),
+    d("powertoys", &[r"{LOCALAPPDATA}\Microsoft\PowerToys"], &["Logs", "Updates", "WinGet"], "Settings for every tool"),
     d("keepassxc", &[r"{APPDATA}\KeePassXC"], &[], "Options (not the database)"),
     d("obs", &[r"{APPDATA}\obs-studio"], &["logs", "crashes", "updates", "plugin_config\\obs-browser\\Cache"], "Scenes, profiles and settings"),
     d("sharex", &[r"{DOCUMENTS}\ShareX"], &["Screenshots", "Logs", "Backup"], "Settings, hotkeys and uploaders"),
@@ -62,7 +62,7 @@ pub const ALL: &[Data] = &[
     d("git", &[r"{PROFILE}\.gitconfig"], &[], "Your name, e-mail and options"),
     d("acrobat", &[r"HKCU\Software\Adobe\Adobe Acrobat"], &[], "Preferences"),
     d("discord", &[r"{APPDATA}\discord\settings.json"], &[], "Start, tray and window options – the rest comes with your account"),
-    d("spotify", &[r"{APPDATA}\Spotify\prefs"], &[], "Sound quality, start and other options of the app"),
+    d("spotify", &[r"{APPDATA}\Spotify\prefs"], &[], "Sound quality, startup and other app options"),
     d("nodejs", &[r"{PROFILE}\.npmrc"], &[], "npm settings"),
     d("python", &[r"{APPDATA}\pip"], &[], "pip settings"),
     d("hemilauncher", &[r"{APPDATA}\HeMi\HeMiLauncher"], &[], "Its settings"),
@@ -72,10 +72,10 @@ pub const ALL: &[Data] = &[
     f("blender", "Blender", &[r"{APPDATA}\Blender Foundation\Blender"], &[], "Preferences, add-ons and the startup file"),
     f("krita", "Krita", &[r"{APPDATA}\krita", r"{LOCALAPPDATA}\kritarc"], &[], "Settings, brushes and workspaces"),
     f("inkscape", "Inkscape", &[r"{APPDATA}\inkscape"], &[], "Preferences, extensions and palettes"),
-    f("jetbrains", "JetBrains IDEs", &[r"{APPDATA}\JetBrains"], &[], "Settings, key maps and plug-ins of IntelliJ, PyCharm, Rider…"),
+    f("jetbrains", "JetBrains IDEs", &[r"{APPDATA}\JetBrains"], &[], "IntelliJ, PyCharm, Rider…: settings, keymaps and plug-ins"),
     f("ableton", "Ableton Live", &[r"{APPDATA}\Ableton"], &["Live Reports"], "Preferences and the library setup"),
     f("flstudio", "FL Studio", &[r"{DOCUMENTS}\Image-Line\FL Studio\Settings"], &[], "Settings and templates"),
-    f("terminal", "Windows Terminal", &[r"{LOCALAPPDATA}\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json"], &[], "Profiles, colours and key bindings"),
+    f("terminal", "Windows Terminal", &[r"{LOCALAPPDATA}\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json"], &[], "Profiles, colors and key bindings"),
     f("foobar", "foobar2000", &[r"{APPDATA}\foobar2000-v2"], &[], "Settings, layout and the library"),
     f("mpchc", "MPC-HC", &[r"HKCU\Software\MPC-HC\MPC-HC"], &[], "Options"),
     f("everything", "Everything", &[r"{APPDATA}\Everything"], &[], "Options and the index setup"),
@@ -202,10 +202,11 @@ pub fn restore(c: &Ctx) -> Res {
             if !from.is_dir() {
                 continue;
             }
-            let r = if reg_key(p).is_some() {
+            let r = if let Some(key) = reg_key(p) {
                 std::fs::read(from.join("settings.reg")).map_err(|e| e.to_string()).and_then(|raw| {
                     let u: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
-                    sys::reg_import(String::from_utf16_lossy(&u).trim_start_matches('\u{feff}'))
+                    // only the key of this program (audit 2026-11-24: a .reg of the backup went in as it was)
+                    sys::reg_import_under(String::from_utf16_lossy(&u).trim_start_matches('\u{feff}'), &[&format!(r"HKEY_CURRENT_USER\{key}")])
                 })
             } else {
                 let to = resolve(p);

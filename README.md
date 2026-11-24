@@ -26,18 +26,19 @@ Without a backup, **Set up this PC** runs the same wizard on the new PC.
 
 | Page | What you choose |
 |---|---|
-| Drivers and the software of the maker | Ticked by the hardware found: NVIDIA graphics, AMD chipset / Radeon graphics, Intel drivers; for a laptop or a ready-made PC its maker's tool (HP Support Assistant, Lenovo Vantage, MyASUS, Dell, Acer, MSI), for a PC built from parts the tool of its motherboard (Armoury Crate, MSI Center). |
+| Drivers and the PC maker's software | Ticked by the hardware found: NVIDIA graphics, AMD chipset / Radeon graphics, Intel drivers; for a laptop or a ready-made PC its maker's tool (HP Support Assistant, Lenovo Vantage, MyASUS, Dell, Acer, MSI), for a PC built from parts its motherboard's tool (Armoury Crate, MSI Center). |
 | Browser | One more besides Microsoft Edge (Chrome, Firefox, Brave, Opera, Vivaldi) – or none. |
-| Programs | About 60 programs in sections, with a search: 7-Zip, VLC, Steam, Epic, Ubisoft Connect, EA app, Discord, Spotify, LibreOffice, VS Code, Git, Python, the free creative apps of ArtCraft… and HeMi Launcher. |
-| Windows | Over 30 changes, each a switch, in groups: clean-up, privacy and AI, the taskbar and Start, File Explorer, system and games, updates. A starting point: recommended, like this PC (read from the old PC), or change nothing. |
-| Settings to take along | From the old PC – Windows: wallpaper, colours, pinned apps, File Explorer, the mouse, Microsoft Defender, mapped network drives, Wi-Fi networks, fonts, display scaling; your programs: VLC, qBittorrent, Brave, Steam, Discord, Spotify, AMD Software, 7-Zip, Notepad++, PowerToys, OBS, VS Code with its extensions, Git… and programs found on the PC that HeMiMizer does not install (Adobe apps, DaVinci Resolve, Blender, JetBrains IDEs…). |
-| Your folders | Own folders copied into the backup and put back to their place. |
-| Where to save | The folder of the backup, the installers now (for a setup offline), a password for the backup, the name of the PC, and for each new program a shortcut on the desktop, pinned to Start or the taskbar, started with Windows – only what you tick. |
+| Programs | About 60 programs in sections, with a search: 7-Zip, VLC, Steam, Epic, Ubisoft Connect, EA app, Discord, Spotify, LibreOffice, VS Code, Git, Python, the free ArtCraft creative apps… and HeMi Launcher. |
+| Windows | Over 30 changes, each a switch, in groups: cleanup, privacy and AI, the taskbar and Start, File Explorer, system and games, updates. A starting point: recommended, like this PC (read from the old PC), or change nothing. |
+| Settings to take along | From the old PC – Windows: wallpaper, colors, pinned apps, File Explorer, the mouse, Microsoft Defender, mapped network drives, Wi-Fi networks, fonts, display scaling; your programs: VLC, qBittorrent, Brave, Steam, Discord, Spotify, AMD Software, 7-Zip, Notepad++, PowerToys, OBS, VS Code with its extensions, Git… and programs found on the PC that HeMiMizer does not install (Adobe apps, DaVinci Resolve, Blender, JetBrains IDEs…). |
+| Your folders | Your own folders, copied into the backup and put back in the same place. |
+| Where to save | The backup folder, the installers now (for an offline setup), a password for the backup, the PC name, and for each new program a shortcut on the desktop, pinned to Start or the taskbar, started with Windows – only what you tick. |
 
 HeMiMizer does only what you choose or see ticked. A backup with a password is encrypted (AES-256-GCM): your settings, the
-Wi-Fi passwords, the settings of programs and your folders – HeMiMizer asks for it on the new PC. After the backup it can
+Wi-Fi passwords, program settings and your folders – HeMiMizer asks for it on the new PC. After the backup it can
 pack everything into one .zip. Before the setup runs, it shows what it will do; at the end, failed steps can be tried again,
-and Done removes HeMiMizer from the PC – it writes no log, nothing of it stays.
+and Done removes HeMiMizer from the PC. It writes no log; only its window settings (`%AppData%\HeMi\HeMiMizer\appearance.ini`,
+if you changed them) stay, and on a USB stick HeMiMizer.exe and the backup stay for the next time.
 
 ## Tools
 
@@ -46,13 +47,18 @@ and Done removes HeMiMizer from the PC – it writes no log, nothing of it stays
 | Download Windows | The ISO of Windows 11 or 10 in the language you choose, straight from Microsoft's servers, with its progress – then a USB stick or a smaller Windows from it in one click. |
 | Make a Windows USB stick | From a Windows 10 / 11 ISO, like Rufus: GPT (UEFI) or MBR (BIOS or UEFI), NTFS (a small FAT32 boot partition and an NTFS one – images of any size) or FAT32 with a split install.wim, the name from the ISO, and your choices for the installation – no TPM 2.0 / Secure Boot / RAM check, no Microsoft account required, a local account, the region and time zone you pick, no privacy questions, no automatic BitLocker. |
 | Make a smaller Windows | A lighter Windows 11 ISO in the spirit of Tiny11, by HeMiMizer's own list: one edition, without ads, Teams, Clipchamp, Xbox, OneDrive and other extras, no TPM check, no Microsoft account needed – the simple choice, or choose yourself what goes and what stays; drivers and HeMiMizer can be added. |
-| Updates itself | At the start it asks GitHub for a newer HeMiMizer and offers it on the first page – downloaded, checked against the checksums of the release and started in place of the old one (Settings → Updates; with HeMi Launcher on the PC the launcher does it). |
+| Updates itself | At the start it asks GitHub for a newer HeMiMizer and offers it on the first page – downloaded, checked against the release checksums and started in place of the old one (Settings → Updates; with HeMi Launcher on the PC the launcher does it). |
 
-Programs with their own licence terms are listed at the setup, each with a link: HeMiMizer installs them only after you
+Programs with their own license terms are listed during setup, each with a link: HeMiMizer installs them only after you
 accept, or leaves them out.
 
-The programs come through **winget** (the package manager of Windows), the HeMi apps from their GitHub releases, the AMD drivers
-from amd.com. Nothing else is sent anywhere.
+HeMiMizer connects only to: **GitHub** (its own update check at every start – it can be turned off in Settings → Updates –
+and the HeMi apps and ArtCraft from their releases), the **winget** sources (the package manager of Windows; the programs
+come from their makers, and winget has its own telemetry), **Microsoft** (winget itself if it is missing, Visual C++,
+DirectX and .NET, Windows Update and Microsoft Store updates, `www.msftconnecttest.com` to see if the PC is online, the
+**Download Windows** tool with the session check of Microsoft's download page, and `oscdimg.exe` for **Make a smaller
+Windows**), **amd.com** (the AMD drivers), your network drives (from the backup) and – only if you turn on Encrypted DNS –
+**Cloudflare** (1.1.1.1 over HTTPS for all DNS queries of the PC). No telemetry; nothing about you or this PC is sent.
 
 ## Download
 
@@ -64,8 +70,8 @@ Windows 11 (Windows 10 mostly works), x64 only. Also in [HeMi Launcher](https://
 
 ## Build
 
-Rust (stable, MSVC). `cargo build --release` gives `build\release\HeMiMizer.exe`; `.\release.ps1` builds both downloads
-(the GitHub workflow does the same for every release). A debug build runs without administrator rights, for trying the window.
+Rust (stable, MSVC). `cargo build --release` gives `build\release\HeMiMizer.exe`; `.\release.ps1` builds the download
+(`build\dist\HeMiMizer.exe`; the GitHub workflow does the same for every release). A debug build runs without administrator rights, for trying the window.
 
 | Folder | What |
 |---|---|
@@ -73,11 +79,11 @@ Rust (stable, MSVC). `cargo build --release` gives `build\release\HeMiMizer.exe`
 | `src\catalog.rs`, `src\hardware.rs`, `src\plan.rs` | What the wizard offers, what the PC is, what was chosen (`plan.json` in the backup). |
 | `src\install.rs` | Installs what was chosen: from the installers of the backup or through winget. |
 | `src\steps.rs`, `src\windows.rs`, `src\debloat.rs`, `src\programs.rs`, `src\drivers.rs` | The steps of the setup. |
-| `src\backup.rs`, `src\config.rs`, `src\appdata.rs` | The backup: settings, installers, own folders, the settings of programs. |
+| `src\backup.rs`, `src\config.rs`, `src\appdata.rs` | The backup: settings, installers, your own folders, program settings. |
 | `src\crypto.rs` | The backup with a password (AES-256-GCM, PBKDF2-SHA256). |
-| `src\shortcuts.rs` | Desktop, Start, taskbar and the start with Windows of the new programs. |
+| `src\shortcuts.rs` | Desktop, Start, taskbar and starting with Windows for the new programs. |
 | `src\usb.rs`, `src\iso.rs`, `src\msiso.rs` | The tools: a Windows USB stick, a smaller Windows ISO, the download of Windows from Microsoft. |
 
 ## License
 
-[MIT](LICENSE). The parts of others are listed in `assets\ThirdPartyNotices.txt` (also in the program: Settings → Licences).
+[MIT](LICENSE). Third-party components are listed in `assets\ThirdPartyNotices.txt` (also in the program: Settings → Licenses).

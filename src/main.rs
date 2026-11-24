@@ -1,7 +1,7 @@
-// HeMiMizer – gets a freshly installed Windows ready: drivers, programs and settings of the author.
-//   HeMiMizer.exe            asks for the NAS password, then does everything and shows its progress
+// HeMiMizer – gets a freshly installed Windows ready: drivers, programs and the settings of the old PC.
+//   HeMiMizer.exe            the window: back up this PC, set it up, the tools
 //   HeMiMizer.exe --resume   continues after the restart (the scheduled task "HeMiMizer - continue")
-//   HeMiMizer.exe --capture  saves the settings of this PC to the folder config next to the exe
+//   HeMiMizer.exe --capture  saves the settings of this PC to the folder config next to the exe (no Wi-Fi passwords)
 //   HeMiMizer.exe --check    shows the newest versions of the programs and drivers
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -78,6 +78,22 @@ fn main() -> eframe::Result {
         config::dir().exists()
     ));
     std::panic::set_hook(Box::new(|info| sys::log(&format!("PANIC: {info}"))));
+    // what HeMiMizer runs as administrator lies only in its protected folder (%ProgramData%\HeMiMizer); without it
+    // nothing is run (audit 2026-11-24)
+    if let Err(e) = sys::protect_state_dir() {
+        sys::log(&format!("protected folder: {e}"));
+        message(
+            "HeMiMizer",
+            &format!(
+                "{}\n\n{e}",
+                tr(
+                    "HeMiMizer cannot prepare its protected work folder. Delete the folder HeMiMizer in C:\\ProgramData and start HeMiMizer again.",
+                    "HeMiMizer nemůže připravit svou chráněnou pracovní složku. Smaž složku HeMiMizer v C:\\ProgramData a spusť HeMiMizer znovu."
+                )
+            ),
+        );
+        return Ok(());
+    }
     // the wizard needs to know the hardware: found out meanwhile
     hardware::detect_in_background();
 
@@ -86,11 +102,13 @@ fn main() -> eframe::Result {
         for l in drivers::local_installers() {
             text.push_str(&format!("\n{}: {:?} {} ({})", tr("Next to the exe", "Vedle exe"), l.kind, l.path.display(), l.version));
         }
+        sys::tidy_state_dir();
         message(tr("HeMiMizer – newest versions", "HeMiMizer – nejnovější verze"), &text);
         return Ok(());
     }
     if args.iter().any(|a| a == "--capture") {
         let text = report(config::capture());
+        sys::tidy_state_dir();
         message(tr("HeMiMizer – settings captured", "HeMiMizer – nastavení zachyceno"), &text);
         return Ok(());
     }
@@ -177,5 +195,8 @@ fn main() -> eframe::Result {
     };
     // Print Screen in the window of HeMiMizer (as administrator Windows does not pass it to the screen capture)
     printscreen::watch();
-    eframe::run_native("HeMiMizer", options, Box::new(move |cc| Ok(Box::new(app::HeMiMizerApp::new(cc, mode)))))
+    let r = eframe::run_native("HeMiMizer", options, Box::new(move |cc| Ok(Box::new(app::HeMiMizerApp::new(cc, mode)))));
+    // the protected folder does not stay when nothing is in it (nothing of HeMiMizer stays on the PC)
+    sys::tidy_state_dir();
+    r
 }

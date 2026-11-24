@@ -35,9 +35,9 @@ const fn it(id: &'static str, title: &'static str, detail: &'static str, simple:
 
 pub const REMOVE: &[Item] = &[
     it("news", "News, Weather, Tips and Get Help", "Bing News, Bing Weather, Tips, Get Help", true, What::Apps(&["Microsoft.BingNews", "Microsoft.BingWeather", "Microsoft.GetHelp", "Microsoft.Getstarted"])),
-    it("office", "Microsoft 365, Outlook (new), To Do, Power Automate", "Ads for paid apps of Microsoft", true, What::Apps(&["Microsoft.MicrosoftOfficeHub", "Microsoft.OutlookForWindows", "Microsoft.Todos", "Microsoft.PowerAutomateDesktop"])),
-    it("teams", "Teams, Family, Quick Assist, Phone Link", "Chat and remote help of Microsoft", true, What::Apps(&["MSTeams", "MicrosoftTeams", "MicrosoftCorporationII.MicrosoftFamily", "MicrosoftCorporationII.QuickAssist", "Microsoft.YourPhone"])),
-    it("clipchamp", "Clipchamp", "The video editor of Microsoft", true, What::Apps(&["Clipchamp.Clipchamp"])),
+    it("office", "Microsoft 365, Outlook (new), To Do, Power Automate", "Ads for paid Microsoft apps", true, What::Apps(&["Microsoft.MicrosoftOfficeHub", "Microsoft.OutlookForWindows", "Microsoft.Todos", "Microsoft.PowerAutomateDesktop"])),
+    it("teams", "Teams, Family, Quick Assist, Phone Link", "Microsoft chat and remote help", true, What::Apps(&["MSTeams", "MicrosoftTeams", "MicrosoftCorporationII.MicrosoftFamily", "MicrosoftCorporationII.QuickAssist", "Microsoft.YourPhone"])),
+    it("clipchamp", "Clipchamp", "Microsoft's video editor", true, What::Apps(&["Clipchamp.Clipchamp"])),
     it("extras", "Solitaire, Maps, Alarms, Sound Recorder, Feedback Hub", "Small apps few people use", true, What::Apps(&["Microsoft.MicrosoftSolitaireCollection", "Microsoft.WindowsMaps", "Microsoft.WindowsAlarms", "Microsoft.WindowsSoundRecorder", "Microsoft.WindowsFeedbackHub", "Microsoft.People", "microsoft.windowscommunicationsapps"])),
     it("ai", "Copilot, Dev Home, Cortana, Bing Search", "AI and search apps", true, What::Apps(&["Microsoft.Copilot", "Microsoft.Windows.DevHome", "Microsoft.549981C3F5F10", "Microsoft.BingSearch"])),
     it("xbox", "Xbox apps and Game Bar", "Keep them for Game Pass and the Xbox app", true, What::Apps(&["Microsoft.GamingApp", "Microsoft.Xbox.TCUI", "Microsoft.XboxGamingOverlay", "Microsoft.XboxGameOverlay", "Microsoft.XboxSpeechToTextOverlay", "Microsoft.XboxIdentityProvider"])),
@@ -154,6 +154,9 @@ pub fn editions(iso: &Path) -> Result<Vec<(u32, String)>, String> {
 pub fn build(o: &Options, log: &dyn Fn(String)) -> Result<String, String> {
     let w = work();
     cleanup(&w);
+    // made anew with permissions only for administrators: a folder in the root of C: may otherwise be changed by every
+    // user (oscdimg.exe is run from it, ownership is taken of what is in it) – audit 2026-11-24
+    sys::make_protected_dir(&w)?;
     std::fs::create_dir_all(w.join("mount")).map_err(|e| format!("{}: {e}", w.display()))?;
     let r = run(o, &w, log);
     if r.is_err() {
@@ -349,7 +352,7 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
         return Err(format!("oscdimg {}: {}", mk.code, mk.text.trim().lines().last().unwrap_or("")));
     }
     let size = std::fs::metadata(&o.out).map(|m| m.len()).unwrap_or(0);
-    let mut text = format!("{} ({:.1} GB), {removed} apps removed", o.out.display(), size as f64 / 1e9);
+    let mut text = format!("{} ({:.1} GB), {} removed", o.out.display(), size as f64 / 1e9, crate::i18n::count(removed, ("app", "apps"), ("aplikace", "aplikace", "aplikací")));
     if !reg_fail.is_empty() {
         text.push_str(&format!("; not set: {}", reg_fail.join("; ")));
     }
@@ -359,11 +362,13 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
 /// oscdimg.exe of Microsoft (version 2.56, part of the Windows ADK), from Microsoft's symbol server. The files there carry
 /// no Authenticode signature of their own (the ADK signs them by a catalog), so the download is checked against the SHA-256
 /// of the known file instead – anything else is refused.
-const OSCDIMG_SHA256: &str = "F5129F313ED7EB46F2677CF522E64264A225F226307ED0DDB52BB14C46E7CFDD";
+pub const OSCDIMG_SHA256: &str = "F5129F313ED7EB46F2677CF522E64264A225F226307ED0DDB52BB14C46E7CFDD";
+/// `sys::download` checks a download from this address against [`OSCDIMG_SHA256`] (instead of a signature).
+pub const OSCDIMG_URL: &str = "https://msdl.microsoft.com/download/symbols/oscdimg.exe/3D44737265000/oscdimg.exe";
 
 fn oscdimg(w: &Path) -> Result<PathBuf, String> {
     let f = w.join("oscdimg.exe");
-    sys::download("https://msdl.microsoft.com/download/symbols/oscdimg.exe/3D44737265000/oscdimg.exe", &f, None)?;
+    sys::download(OSCDIMG_URL, &f, None)?;
     let hash = sys::ps(&format!("(Get-FileHash -LiteralPath {} -Algorithm SHA256).Hash", q(&f.display().to_string())))?;
     if !hash.trim().eq_ignore_ascii_case(OSCDIMG_SHA256) {
         let _ = std::fs::remove_file(&f);

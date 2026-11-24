@@ -1,5 +1,5 @@
 //! The programs: always the newest version straight from its maker, installed silently (skipped when the newest
-//! is already installed), then set up as on the PC of the author (components, shortcuts, settings).
+//! is already installed), then set up as chosen in the wizard (components, shortcuts, settings from the backup).
 
 use crate::config;
 use crate::i18n::tr;
@@ -32,7 +32,7 @@ pub fn installed_version(name: &str) -> Option<String> {
 // ---------------------------------------------------------------- the newest versions
 
 fn not_found(what: &str) -> String {
-    format!("{what}: {}", tr("the download link was not found on the page of the maker", "odkaz ke stažení nebyl na stránce výrobce nalezen"))
+    format!("{what}: {}", tr("the download link was not found on the maker's page", "odkaz ke stažení nebyl na stránce výrobce nalezen"))
 }
 
 pub fn url_7zip() -> Result<String, String> {
@@ -148,7 +148,7 @@ pub fn vlc_lean(c: &Ctx) -> Result<(), String> {
         return Ok(());
     }
     {
-        c.log(tr("Removing the parts of VLC that are not wanted", "Odebírám nechtěné součásti VLC"));
+        c.log(tr("Removing the unwanted parts of VLC", "Odebírám nechtěné součásti VLC"));
         let ax = format!(r"{dir}\axvlc.dll");
         if Path::new(&ax).exists() {
             let _ = sys::run("regsvr32.exe", &["/u", "/s", &ax]);
@@ -497,7 +497,12 @@ pub fn network_drives(c: &Ctx) -> Res {
             save_credential(&t, &user, &password)?;
         }
     }
-    // drives mapped by an elevated program are visible to File Explorer too (after a restart)
+    // drives mapped by an elevated program are visible to File Explorer too (after a restart), and HeMiMizer itself
+    // sees the drives of the user after its restart (it may continue from the NAS); named in the description of the step
+    c.log(tr(
+        "EnableLinkedConnections = 1: programs run as administrator see the network drives too",
+        "EnableLinkedConnections = 1: síťové disky uvidí i programy spuštěné jako správce"
+    ));
     sys::set_dword(Root::Hklm, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableLinkedConnections", 1)?;
     let mut done = Vec::new();
     let mut errors = Vec::new();
@@ -559,30 +564,48 @@ fn map_for_user(c: &Ctx, mapped: &[(String, String)]) {
     }
 }
 
-/// Every network drive and \\server path – also ones added later – in the zone Local intranet, where opening and
-/// running files is allowed: no "Opening these files might be harmful" for exe / .reg / …, and copied files get no
-/// Mark of the Web – network drives behave like C:. `ProtocolDefaults\file = 1` makes Local intranet the zone of
-/// every file:// address no other rule matches (Windows has Internet, 3, there); the servers of the drives are
-/// listed by name too.
+/// Only the servers of the network drives of the backup – by name, short name and IP – in the zone Local intranet,
+/// where opening and running files is allowed: no "Opening these files might be harmful" for exe / .reg / … from them,
+/// and files copied from them get no Mark of the Web. Every other file:// address (another server, WebDAV) keeps its
+/// zone: since the audit of 2026-11-24 neither `ProtocolDefaults\file = 1` (all of them in Local intranet) nor
+/// "all network paths are intranet" (UNCAsIntranet, IntranetName) is set; the global one of an earlier HeMiMizer is put
+/// back to Internet (3, the value of Windows).
 pub fn trust_servers(drives: &[config::Drive]) -> Result<(), String> {
     let inet = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
     let mut hosts: Vec<String> = Vec::new();
-    for d in drives {
+    let mut ips: Vec<String> = Vec::new();
+    for d in drives.iter().filter(|d| config::valid_drive(d)) {
         let s = d.server().to_lowercase();
         let short = s.split('.').next().unwrap_or(&s).to_string();
         for h in [s, short] {
-            if !h.is_empty() && !hosts.contains(&h) {
+            if h.parse::<std::net::Ipv4Addr>().is_ok() {
+                if !ips.contains(&h) {
+                    ips.push(h);
+                }
+            } else if !h.is_empty() && !hosts.contains(&h) {
                 hosts.push(h);
             }
+        }
+        if !d.ip.is_empty() && !ips.contains(&d.ip) {
+            ips.push(d.ip.clone());
         }
     }
     for h in &hosts {
         // 1 = Local intranet, for file:// (UNC paths and mapped drives)
         sys::set_dword(Root::Hkcu, &format!(r"{inet}\ZoneMap\Domains\{h}"), "file", 1)?;
     }
-    sys::dwords(Root::Hkcu, &format!(r"{inet}\ZoneMap"), &[("UNCAsIntranet", 1), ("IntranetName", 1)])?;
-    sys::set_dword(Root::Hkcu, &format!(r"{inet}\ZoneMap\ProtocolDefaults"), "file", 1)?;
-    // Local intranet: launching programs and unsafe files = enable (0)
+    // an IP is listed as a range of one address (Domains holds names only)
+    for (n, ip) in ips.iter().enumerate() {
+        let k = format!(r"{inet}\ZoneMap\Ranges\HeMiMizer{}", n + 1);
+        sys::set_sz(Root::Hkcu, &k, ":Range", ip)?;
+        sys::set_dword(Root::Hkcu, &k, "file", 1)?;
+    }
+    let defaults = format!(r"{inet}\ZoneMap\ProtocolDefaults");
+    if sys::get_dword(Root::Hkcu, &defaults, "file") == Some(1) {
+        sys::set_dword(Root::Hkcu, &defaults, "file", 3)?;
+    }
+    // Local intranet (now only these servers and what Windows itself counts to it): launching programs and unsafe
+    // files = enable (0)
     sys::set_dword(Root::Hkcu, &format!(r"{inet}\Zones\1"), "1806", 0)?;
     Ok(())
 }
@@ -657,7 +680,7 @@ fn hemidock_settings(c: &Ctx, exe: &Path) -> Result<(), String> {
     if tar.is_empty() {
         return Ok(());
     }
-    c.log(tr("Applying the settings of HeMiDock", "Nastavuji HeMiDock"));
+    c.log(tr("Applying HeMiDock's settings", "Nastavuji HeMiDock"));
     let tmp = sys::work_dir().join("HeMiDock-settings");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;

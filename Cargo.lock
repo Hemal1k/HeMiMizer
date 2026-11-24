@@ -851,7 +851,7 @@ dependencies = [
 
 [[package]]
 name = "hemimizer"
-version = "1.4.1"
+version = "1.6.0"
 dependencies = [
  "aes-gcm",
  "eframe",

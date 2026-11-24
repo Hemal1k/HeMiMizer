@@ -343,7 +343,7 @@ fn copy(from: &Path, to: &Path, skip_dirs: &[&str], skip_files: &[PathBuf], tota
         args.extend(skip_files.iter().map(|f| f.display().to_string()));
     }
     let before = used(to);
-    let mut child = std::process::Command::new("robocopy.exe").args(&args).creation_flags(0x0800_0000).spawn().map_err(|e| format!("robocopy: {e}"))?;
+    let mut child = std::process::Command::new(crate::sys::program("robocopy.exe")).args(&args).creation_flags(0x0800_0000).spawn().map_err(|e| format!("robocopy: {e}"))?;
     let code = loop {
         if let Some(s) = child.try_wait().map_err(|e| e.to_string())? {
             break s.code().unwrap_or(16);

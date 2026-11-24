@@ -52,7 +52,7 @@ pub struct Language {
 }
 
 fn curl(args: &[&str]) -> Result<String, String> {
-    let o = std::process::Command::new("curl.exe").args(args).creation_flags(0x0800_0000).output().map_err(|e| format!("curl: {e}"))?;
+    let o = std::process::Command::new(crate::sys::program("curl.exe")).args(args).creation_flags(0x0800_0000).output().map_err(|e| format!("curl: {e}"))?;
     if !o.status.success() {
         return Err(format!("curl {}: {}", o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stderr).trim()));
     }
@@ -157,7 +157,7 @@ pub fn download(url: &str, dest: &Path, progress: &dyn Fn(u64, u64)) -> Result<(
     let total = size(url);
     let part = dest.with_extension("iso.part");
     let p = part.display().to_string();
-    let mut child = std::process::Command::new("curl.exe")
+    let mut child = std::process::Command::new(crate::sys::program("curl.exe"))
         .args(["-sSL", "--fail", "--retry", "3", "-C", "-", "-A", UA, "-o", &p, url])
         .creation_flags(0x0800_0000)
         .spawn()
@@ -190,6 +190,6 @@ static RUNNING: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new
 pub fn stop() {
     let pid = RUNNING.swap(0, std::sync::atomic::Ordering::SeqCst);
     if pid != 0 {
-        let _ = std::process::Command::new("taskkill.exe").args(["/PID", &pid.to_string(), "/F"]).creation_flags(0x0800_0000).status();
+        let _ = std::process::Command::new(crate::sys::program("taskkill.exe")).args(["/PID", &pid.to_string(), "/F"]).creation_flags(0x0800_0000).status();
     }
 }

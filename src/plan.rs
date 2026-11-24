@@ -117,6 +117,44 @@ pub fn resolve_folder(stored: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(stored.replace("{PROFILE}", &crate::sys::profile().display().to_string()))
 }
 
+/// A folder of plan.json that may be written to when the backup goes back (robocopy as administrator): in the profile,
+/// or anywhere else on a drive except the places of Windows and of the programs (the Windows folder, Program Files,
+/// ProgramData, the other profiles, the root of a drive); a full path without "." or ".." and without a link on the
+/// way (a junction would lead somewhere else). None = refused (audit 2026-11-24: any path of plan.json was taken).
+pub fn safe_folder(stored: &str) -> Option<std::path::PathBuf> {
+    use std::path::Component;
+    let path = resolve_folder(stored);
+    let mut parts = path.components();
+    let (Some(Component::Prefix(_)), Some(Component::RootDir)) = (parts.next(), parts.next()) else { return None };
+    let rest: Vec<Component> = parts.collect();
+    if rest.is_empty() || !rest.iter().all(|c| matches!(c, Component::Normal(_))) {
+        return None;
+    }
+    let norm = |p: &std::path::Path| p.display().to_string().trim_end_matches('\\').to_lowercase();
+    let me = norm(&path);
+    let inside = |base: &str| !base.is_empty() && (me == base || me.starts_with(&format!("{base}\\")));
+    let profile = norm(&crate::sys::profile());
+    let in_profile = inside(&profile) && me != profile;
+    if !in_profile {
+        let system = crate::sys::program("x").parent().and_then(|p| p.parent()).map(norm).unwrap_or_default();
+        let drive = system.get(..2).unwrap_or("c:").to_string();
+        let env = |n: &str| std::env::var_os(n).map(|v| norm(std::path::Path::new(&v))).unwrap_or_default();
+        let blocked = [system, env("ProgramFiles"), env("ProgramFiles(x86)"), env("ProgramW6432"), env("ProgramData"), format!("{drive}\\users")];
+        if blocked.iter().any(|b| inside(b)) {
+            return None;
+        }
+    }
+    // no link anywhere on the way down to the folder
+    let mut at = std::path::PathBuf::new();
+    for c in path.components() {
+        at.push(c);
+        if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
+            return None;
+        }
+    }
+    Some(path)
+}
+
 /// For the window: {PROFILE} as "Your profile".
 pub fn show_folder(stored: &str) -> String {
     stored.replace("{PROFILE}", "Your profile")

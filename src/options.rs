@@ -16,7 +16,8 @@ pub const OPTIONS: &[(&str, bool)] = &[
     ("runtimes", true),
     ("store", true),
     ("windows-update", true),
-    ("cleanup", true),
+    // off by default: Disk Clean-up deletes for good (audit 2026-11-24)
+    ("cleanup", false),
 ];
 
 /// Steps of the author's own taste that the public HeMiMizer never runs.

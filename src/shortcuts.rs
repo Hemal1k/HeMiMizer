@@ -1,4 +1,4 @@
-//! The step "Shortcuts and start": what the user chose in the wizard for each new program – a shortcut on the desktop,
+//! The step "Shortcuts and startup": what the user chose in the wizard for each new program – a shortcut on the desktop,
 //! pinned to Start, pinned to the taskbar, started with Windows. Nothing else is touched: a program the wizard did not
 //! install, and a pin the user did not tick, stay as they are.
 //!

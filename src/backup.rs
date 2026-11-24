@@ -21,7 +21,7 @@ pub struct Item {
 /// Everything the backup offers, in its order.
 pub fn items() -> Vec<Item> {
     let mut v: Vec<Item> = config::parts().into_iter().map(|(id, name, _)| Item { id, name }).collect();
-    v.push(Item { id: INSTALLERS, name: tr("All installers, for the setup offline", "Všechny instalačky, pro instalaci offline") });
+    v.push(Item { id: INSTALLERS, name: tr("All installers, for the setup offline", "Všechny instalační programy, pro instalaci offline") });
     v.push(Item { id: FOLDERS, name: "Your folders" });
     // the settings of the programs of the wizard (shown only for the programs chosen)
     for d in crate::appdata::ALL {
@@ -147,7 +147,7 @@ fn copy_folders(log: &dyn Fn(String)) -> Result<String, String> {
             failed.push(format!("{}: {e}", src.display()));
         }
     }
-    let text = format!("{} folders", plan.folders.len() - failed.len());
+    let text = crate::i18n::count(plan.folders.len() - failed.len(), ("folder", "folders"), ("složka", "složky", "složek"));
     if failed.is_empty() { Ok(text) } else { Err(format!("{text}\n{}", failed.join("\n"))) }
 }
 
@@ -236,10 +236,10 @@ pub fn download_installers(log: &dyn Fn(String)) -> Result<String, String> {
     std::fs::write(index(), lines.join("\r\n")).map_err(|e| e.to_string())?;
     let size: u64 = std::fs::read_dir(&dir).map(|r| r.flatten().filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum()).unwrap_or(0);
     let text = format!(
-        "{} {new}, {} {kept} · {:.1} GB · {}",
+        "{} {new}, {} {kept} · {} GB · {}",
         tr("downloaded", "staženo"),
         tr("kept", "ponecháno"),
-        size as f64 / 1e9,
+        crate::i18n::dec1(size as f64 / 1e9),
         dir.display()
     );
     if failed.is_empty() { Ok(text) } else { Err(format!("{text}\n{}", failed.join("\n"))) }

@@ -1,5 +1,6 @@
 //! Drivers: Windows Update must not install drivers (nor apps such as Razer Synapse that come with them);
-//! the AMD chipset and graphics drivers come straight from amd.com, then the settings of the author.
+//! the AMD chipset and graphics drivers come straight from amd.com (or the installers next to HeMiMizer.exe), then the
+//! graphics settings from the backup.
 
 use crate::config;
 use crate::i18n::tr;
@@ -196,8 +197,8 @@ fn not_next_to_exe(c: &Ctx, what: &str) -> Res {
     let dir = crate::config::dir().parent().map(|d| d.display().to_string()).unwrap_or_default();
     // c.note writes it to the log too
     let _ = dir;
-    c.note(format!("{what}: {}", tr("no installer was chosen – install it by hand", "nebyla vybrána instalačka – nainstaluj ho ručně")));
-    Ok(tr("Installer not found – skipped", "Instalačka nenalezena – přeskočeno").into())
+    c.note(format!("{what}: {}", tr("no installer was chosen – install it by hand", "nebyl vybrán instalační program – nainstaluj ho ručně")));
+    Ok(tr("Installer not found – skipped", "Instalační program nenalezen – přeskočeno").into())
 }
 
 pub fn chipset(c: &Ctx) -> Res {
@@ -275,10 +276,12 @@ pub fn gpu_settings(c: &Ctx) -> Res {
     }
     c.log(tr("Applying the graphics settings", "Nastavuji grafiku"));
     if config::has("amd-umd.reg") {
-        sys::reg_import(&config::text("amd-umd.reg", true).replace("{GPU}", &format!(r"HKEY_LOCAL_MACHINE\{key}")))?;
+        // only the 3D settings of this Radeon (the one key of the machine a backup may change)
+        let umd = format!(r"HKEY_LOCAL_MACHINE\{key}\UMD");
+        sys::reg_import_under(&config::text("amd-umd.reg", true).replace("{GPU}", &format!(r"HKEY_LOCAL_MACHINE\{key}")), &[&umd])?;
     }
     if config::has("amd-user.reg") {
-        sys::reg_import(&config::text("amd-user.reg", true))?;
+        sys::reg_import_under(&config::text("amd-user.reg", true), &[r"HKEY_CURRENT_USER\Software\AMD"])?;
     }
     if !config::has("OC.xml") {
         return Ok(tr("Graphics settings applied", "Nastavení grafiky použito").into());

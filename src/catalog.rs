@@ -52,7 +52,7 @@ pub fn kind_glyph(k: Kind) -> char {
 /// A line under the title of a section.
 pub fn kind_note(k: Kind) -> &'static str {
     match k {
-        Kind::Creative => "Open-source apps of getartcraft.com for pictures, video, sound and documents – still early versions",
+        Kind::Creative => "Open-source apps from getartcraft.com for pictures, video, sound and documents – still early versions",
         _ => "",
     }
 }
@@ -80,7 +80,7 @@ pub struct Item {
     pub group: Group,
     pub kind: Kind,
     pub source: Source,
-    /// the licence terms to accept (a web page); empty = open source, nothing to accept
+    /// the license terms to accept (a web page); empty = open source, nothing to accept
     pub license: &'static str,
 }
 
@@ -115,7 +115,7 @@ pub const ALL: &[Item] = &[
     // programs
     it("7zip", "7-Zip", "Archives (zip, 7z, rar…)", App, Essentials, Winget("7zip.7zip"), ""),
     it("winrar", "WinRAR", "Archives – a trial, then paid", App, Essentials, Winget("RARLab.WinRAR"), "https://www.win-rar.com/winrarlicense.html"),
-    it("powertoys", "PowerToys", "Tools of Microsoft for power users", App, Essentials, Winget("Microsoft.PowerToys"), ""),
+    it("powertoys", "PowerToys", "Microsoft tools for power users", App, Essentials, Winget("Microsoft.PowerToys"), ""),
     it("notepadpp", "Notepad++", "Text and code editor", App, Essentials, Winget("Notepad++.Notepad++"), ""),
     it("acrobat", "Adobe Acrobat Reader", "PDF reader", App, Essentials, Winget("Adobe.Acrobat.Reader.64-bit"), "https://www.adobe.com/legal/terms.html"),
     it("bitwarden", "Bitwarden", "Password manager", App, Essentials, Winget("Bitwarden.Bitwarden"), ""),
@@ -132,8 +132,8 @@ pub const ALL: &[Item] = &[
     it("steam", "Steam", "Games", App, Games, Winget("Valve.Steam"), "https://store.steampowered.com/subscriber_agreement/"),
     it("epic", "Epic Games Launcher", "Games", App, Games, Winget("EpicGames.EpicGamesLauncher"), "https://epicgames.com/eula"),
     it("gog", "GOG GALAXY", "Games", App, Games, Winget("GOG.Galaxy"), "https://www.gog.com/en/user_agreement"),
-    it("ubisoft", "Ubisoft Connect", "Games of Ubisoft", App, Games, Winget("Ubisoft.Connect"), "https://legal.ubi.com/termsofuse/"),
-    it("ea", "EA app", "Games of Electronic Arts", App, Games, Winget("ElectronicArts.EADesktop"), "https://tos.ea.com/legalapp/WEBTERMS/US/en/PC/"),
+    it("ubisoft", "Ubisoft Connect", "Ubisoft games", App, Games, Winget("Ubisoft.Connect"), "https://legal.ubi.com/termsofuse/"),
+    it("ea", "EA app", "Electronic Arts games", App, Games, Winget("ElectronicArts.EADesktop"), "https://tos.ea.com/legalapp/WEBTERMS/US/en/PC/"),
     it("discord", "Discord", "Chat and voice", App, Chat, Winget("Discord.Discord"), "https://discord.com/terms"),
     it("telegram", "Telegram", "Messages", App, Chat, Winget("Telegram.TelegramDesktop"), ""),
     it("whatsapp", "WhatsApp", "Messages and calls", App, Chat, Store("9NKSQGP7F2NH"), "https://www.whatsapp.com/legal/terms-of-service"),

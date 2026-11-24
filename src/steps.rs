@@ -1,6 +1,6 @@
 //! The list of what HeMiMizer does, in the order it is done, and the worker that does it.
 //! After the graphics driver (when a driver was installed) the PC restarts and HeMiMizer continues
-//! by itself after the sign-in (a scheduled task "HeMiMizer – continue", run as administrator).
+//! by itself after the sign-in (a scheduled task "HeMiMizer - continue", run as administrator).
 
 use crate::i18n::tr;
 use crate::{drivers, programs, sys, windows};
@@ -94,23 +94,23 @@ pub fn all() -> Vec<Step> {
         step!(
             "microsoft-apps",
             Cleanup,
-            "Apps of Microsoft not needed",
+            "Unneeded Microsoft apps",
             "Nepotřebné aplikace Microsoftu",
             "Clipchamp, News, Weather, Solitaire, Teams (personal), new Outlook, To Do, Tips, Feedback Hub, Maps, Phone Link…",
-            "Clipchamp, Zprávy, Počasí, Solitaire, Teams (osobní), nový Outlook, To Do, Tipy, Centrum Feedback, Mapy, Propojení s telefonem…",
+            "Clipchamp, Zprávy, Počasí, Solitaire, Teams (osobní), nový Outlook, To Do, Tipy, Centrum Feedback Hub, Mapy, Propojení s telefonem…",
             crate::debloat::microsoft_apps
         ),
-        step!("xbox-apps", Cleanup, "Xbox apps", "Aplikace Xbox", "The Xbox app, Game Bar and their helpers – keep them for games from the Xbox app or Game Pass", "Aplikace Xbox, herní panel a jejich pomocníci", crate::debloat::xbox_apps),
+        step!("xbox-apps", Cleanup, "Xbox apps", "Aplikace Xbox", "The Xbox app, Game Bar and their helpers – keep them for games from the Xbox app or Game Pass", "Aplikace Xbox, Herní panel a jejich doplňky – nech je, pokud hraješ hry z aplikace Xbox nebo Game Pass", crate::debloat::xbox_apps),
         step!(
             "ad-software",
             Cleanup,
             "Trial and advertising software",
             "Zkušební a reklamní software",
-            "McAfee, Norton, Avast, AVG, ExpressVPN, WildTangent, Candy Crush, Booking, TikTok and similar, when the maker put them in",
-            "McAfee, Norton, Avast, AVG, ExpressVPN, WildTangent, Candy Crush, Booking, TikTok a podobné, když je přidal výrobce",
+            "Candy Crush, TikTok, Booking, Netflix and similar apps only when the maker put them into Windows (yours from the Store stay); ExpressVPN and WildTangent by their exact winget id; antivirus programs are only named, never removed",
+            "Candy Crush, TikTok, Booking, Netflix a podobné aplikace, jen když je do Windows dal výrobce (tvoje ze Storu zůstanou); ExpressVPN a WildTangent podle přesného ID ve wingetu; antiviry se jen vypíšou, nikdy neodeberou",
             crate::debloat::ad_software
         ),
-        step!("hibernation", Windows, "Hibernation off", "Vypnout hibernaci", "Frees the space of hiberfil.sys (several GB); Fast startup goes with it", "Uvolní místo souboru hiberfil.sys (několik GB); zmizí i Rychlé spuštění", crate::debloat::hibernation_off),
+        step!("hibernation", Windows, "Hibernation off", "Vypnout hibernaci", "Frees the space hiberfil.sys takes (several GB); Fast startup goes with it", "Uvolní místo souboru hiberfil.sys (několik GB); zmizí i Rychlé spuštění", crate::debloat::hibernation_off),
         step!(
             "folders",
             Windows,
@@ -134,8 +134,8 @@ pub fn all() -> Vec<Step> {
             Programs,
             "Network drives",
             "Síťové disky",
-            "The network drives from the backup; the password is asked once and saved",
-            "Síťové disky ze zálohy; heslo se zadá jednou a uloží",
+            "The network drives from the backup; the password is asked once and saved. Their servers (only those) go into the Local intranet zone, so files from them open without a security warning; programs run as administrator see the drives too (EnableLinkedConnections)",
+            "Síťové disky ze zálohy; heslo se zadá jednou a uloží. Jejich servery (jen ty) se přidají do zóny Místní intranet, takže se soubory z nich otevřou bez bezpečnostního upozornění; disky uvidí i programy spuštěné jako správce (EnableLinkedConnections)",
             programs::network_drives
         ),
         step!(
@@ -143,7 +143,7 @@ pub fn all() -> Vec<Step> {
             Programs,
             "HeMiDock",
             "HeMiDock",
-            "The newest version from GitHub (its installer adds the .NET and Windows App Runtime)",
+            "The newest version from GitHub (its installer adds .NET and the Windows App Runtime)",
             "Nejnovější verze z GitHubu (instalátor doplní .NET a Windows App Runtime)",
             programs::hemidock
         ),
@@ -152,7 +152,7 @@ pub fn all() -> Vec<Step> {
             Drivers,
             "No drivers from Windows Update",
             "Žádné ovladače z Windows Update",
-            "Also no Razer Synapse and other device apps installed automatically",
+            "Razer Synapse and other device apps are not installed automatically either",
             "Ani Razer Synapse a jiné aplikace zařízení se nenainstalují samy",
             drivers::no_driver_updates
         ),
@@ -161,8 +161,8 @@ pub fn all() -> Vec<Step> {
             Drivers,
             "AMD chipset driver",
             "Ovladač čipsetu AMD",
-            "Offline from the installer next to HeMiMizer.exe, else the newest from amd.com",
-            "Offline z instalačky vedle HeMiMizer.exe, jinak nejnovější z amd.com",
+            "Offline from the installer next to HeMiMizer.exe, otherwise the newest from amd.com",
+            "Offline z instalačního programu vedle HeMiMizer.exe, jinak nejnovější z amd.com",
             drivers::chipset
         ),
         step!(
@@ -170,25 +170,25 @@ pub fn all() -> Vec<Step> {
             Drivers,
             "AMD graphics driver",
             "Ovladač grafiky AMD",
-            "Offline from the installer next to HeMiMizer.exe, else from amd.com (~1 GB); then a restart, HeMiMizer continues",
-            "Offline z instalačky vedle HeMiMizer.exe, jinak z amd.com (~1 GB); pak restart, HeMiMizer pokračuje",
+            "Offline from the installer next to HeMiMizer.exe, otherwise from amd.com (~1 GB); then a restart, HeMiMizer continues",
+            "Offline z instalačního programu vedle HeMiMizer.exe, jinak z amd.com (~1 GB); pak restart, HeMiMizer pokračuje",
             drivers::gpu
         ),
         step!(
             "offline",
             Programs,
             "Installers from the backup",
-            "Instalačky ze zálohy",
+            "Instalační programy ze zálohy",
             "The installers the backup downloaded are copied to this PC – the programs are installed offline",
-            "Instalačky stažené zálohou se zkopírují do PC – programy se nainstalují offline",
+            "Instalační programy stažené zálohou se zkopírují do PC – programy se nainstalují offline",
             crate::downloads::import_offline
         ),
         step!(
             "downloads",
             Programs,
             "Download the installers",
-            "Stažení instalaček",
-            "Everything to install is downloaded first; what fails can be chosen by hand",
+            "Stažení instalačních programů",
+            "Everything to install is downloaded first; anything that fails can be chosen by hand",
             "Nejdřív se stáhne vše k instalaci; co se nepovede, můžeš vybrat ručně",
             crate::downloads::download_all
         ),
@@ -197,8 +197,8 @@ pub fn all() -> Vec<Step> {
             Windows,
             "Microsoft Store updates",
             "Aktualizace Microsoft Store",
-            "Store looks for updates of its apps and downloads them in the background",
-            "Store vyhledá aktualizace svých aplikací a stáhne je na pozadí",
+            "Microsoft Store looks for updates to its apps and downloads them in the background",
+            "Microsoft Store vyhledá aktualizace svých aplikací a stáhne je na pozadí",
             windows::store_updates
         ),
         step!(
@@ -243,7 +243,7 @@ pub fn all() -> Vec<Step> {
             Windows,
             "File Explorer view",
             "Zobrazení Průzkumníka",
-            "The view of File Explorer from the backup",
+            "The File Explorer view from the backup",
             "Zobrazení Průzkumníka ze zálohy",
             windows::explorer
         ),
@@ -252,7 +252,7 @@ pub fn all() -> Vec<Step> {
             Windows,
             "Windows settings",
             "Nastavení Windows",
-            "The settings of Windows chosen in the wizard",
+            "The Windows settings chosen in the wizard",
             "Nastavení Windows zvolená v průvodci",
             crate::tweaks::run
         ),
@@ -261,7 +261,7 @@ pub fn all() -> Vec<Step> {
             Programs,
             "Settings of your programs",
             "Nastavení tvých programů",
-            "The settings of the programs, from the backup",
+            "Program settings from the backup",
             "Nastavení programů ze zálohy",
             crate::appdata::restore
         ),
@@ -277,12 +277,12 @@ pub fn all() -> Vec<Step> {
         step!("mouse-settings", Windows, "Mouse", "Myš", "Pointer speed, scrolling and double-click speed from the backup", "Rychlost ukazatele, posouvání a dvojklik ze zálohy", windows::mouse),
         step!("wifi", Windows, "Wi-Fi networks", "Sítě Wi-Fi", "The saved networks from the backup, with their passwords", "Uložené sítě ze zálohy i s hesly", windows::wifi),
         step!("fonts", Windows, "Fonts", "Písma", "The fonts installed on the old PC, from the backup", "Písma nainstalovaná na starém PC, ze zálohy", windows::fonts),
-        step!("calculator", Windows, "Calculator", "Kalkulačka", "Uninstalled", "Odinstalovat", windows::calculator),
+        step!("calculator", Windows, "Calculator", "Kalkulačka", "Uninstalled", "Odinstalovaná", windows::calculator),
         step!(
             "restore",
             Windows,
             "System Restore off",
-            "Vypnout obnovu systému",
+            "Ochrana systému vypnutá",
             "No restore points; the existing ones are deleted",
             "Žádné body obnovení; ty existující se smažou",
             windows::restore_off
@@ -290,9 +290,9 @@ pub fn all() -> Vec<Step> {
         step!(
             "appearance",
             Windows,
-            "Colours and language",
-            "Barvy a jazyk",
-            "Dark mode and the accent colour from the backup",
+            "Colors",
+            "Barvy",
+            "Dark mode and the accent color from the backup",
             "Tmavý režim a barva zvýraznění ze zálohy",
             windows::appearance
         ),
@@ -301,16 +301,16 @@ pub fn all() -> Vec<Step> {
             Windows,
             "Microsoft Defender",
             "Microsoft Defender",
-            "The settings from the backup and memory integrity; exclusions for the Steam libraries",
-            "Nastavení ze zálohy a integrita paměti; výjimky pro knihovny Steamu",
+            "The settings from the backup and memory integrity – not the ones that would switch protection off; exclusions for the Steam libraries and, when chosen, qBittorrent",
+            "Nastavení ze zálohy a integrita paměti – ne ta, která by ochranu vypnula; výjimky pro knihovny Steamu a qBittorrent, pokud je vybraný",
             windows::defender
         ),
         step!(
             "startup",
             Windows,
             "Other programs do not start with Windows",
-            "Aplikace při spuštění",
-            "OneDrive and what else is in the startup list – the new programs follow the table of the last page (can be turned on in Task Manager)",
+            "Ostatní programy se nespouštějí s Windows",
+            "OneDrive and what else is in the startup list – the new programs follow the table on the last page (they can be turned on in Task Manager)",
             "OneDrive a další v seznamu spouštění – nové programy podle tabulky na poslední stránce (jdou zapnout ve Správci úloh)",
             windows::startup_apps
         ),
@@ -327,9 +327,9 @@ pub fn all() -> Vec<Step> {
         step!(
             "shortcuts",
             Programs,
-            "Shortcuts and start",
+            "Shortcuts and startup",
             "Zástupci a spouštění",
-            "Desktop, Start, taskbar and the start with Windows of the new programs, as chosen",
+            "Desktop, Start, taskbar and starting with Windows for the new programs, as chosen",
             "Plocha, Start, hlavní panel a spouštění nových programů podle volby",
             crate::shortcuts::run
         ),
@@ -338,8 +338,8 @@ pub fn all() -> Vec<Step> {
             Cleanup,
             "Clean up",
             "Vyčistit",
-            "Temporary files, component store, Disk Clean-up with all items, at last the downloaded updates",
-            "Dočasné soubory, úložiště součástí, Vyčištění disku se všemi položkami, nakonec stažené aktualizace",
+            "Temporary files, component store, Disk Cleanup (not Downloads, the Recycle Bin, the previous Windows or file versions), and finally the downloaded updates",
+            "Dočasné soubory, úložiště součástí, Vyčištění disku (bez Stažených souborů, Koše, předchozích Windows a verzí souborů), nakonec stažené aktualizace",
             windows::cleanup
         ),
     ];
@@ -370,7 +370,14 @@ fn restore_folders(c: &Ctx) -> Res {
     let mut failed = Vec::new();
     for (n, f) in plan.folders.iter().enumerate() {
         let from = crate::backup::folders_dir().join((n + 1).to_string());
-        let to = crate::plan::resolve_folder(f);
+        let Some(to) = crate::plan::safe_folder(f) else {
+            failed.push(format!(
+                "{}: {}",
+                crate::plan::show_folder(f),
+                tr("not put back – a place of Windows or of the programs, or not a plain folder path", "nevráceno – místo Windows nebo programů, nebo to není prostá cesta ke složce")
+            ));
+            continue;
+        };
         if !from.is_dir() {
             failed.push(format!("{}: not in the backup", to.display()));
             continue;
@@ -380,7 +387,7 @@ fn restore_folders(c: &Ctx) -> Res {
             failed.push(format!("{}: {e}", to.display()));
         }
     }
-    let text = format!("{} folders", plan.folders.len() - failed.len());
+    let text = crate::i18n::count(plan.folders.len() - failed.len(), ("folder", "folders"), ("složka", "složky", "složek"));
     if failed.is_empty() { Ok(text) } else { Err(format!("{text}\n{}", failed.join("\n"))) }
 }
 
@@ -441,8 +448,14 @@ impl Ctx {
     }
 }
 
+/// The state between the restarts (resume.txt, origin.txt…) and the copy for them: the protected folder
+/// %ProgramData%\HeMiMizer, not %LOCALAPPDATA% – the scheduled task runs that copy as administrator, so no program of
+/// the user may change it (audit 2026-11-24).
 fn data_dir() -> PathBuf {
-    PathBuf::from(sys::env("LOCALAPPDATA", "")).join("HeMiMizer")
+    if let Err(e) = sys::protect_state_dir() {
+        sys::log(&format!("protected folder: {e}"));
+    }
+    sys::state_dir()
 }
 
 fn resume_file() -> PathBuf {
@@ -463,12 +476,13 @@ fn todo_add(line: &str) {
 }
 
 /// The folder HeMiMizer.exe was started from at first (kept over the restarts, when the copy in
-/// %LOCALAPPDATA%\HeMiMizer\app runs): the log and the to-do file stay there.
+/// %ProgramData%\HeMiMizer\app runs): a Debug build keeps its log and the to-do file there.
 pub fn origin_file() -> PathBuf {
     data_dir().join("origin.txt")
 }
 
-/// At the very end: "HeMiMizer - udělat ručně.txt" next to the log.
+/// At the very end: "HeMiMizer - to do by hand.txt" next to the log – only in a Debug build (the release writes no log,
+/// so `log_path()` is empty and no file is written; the window shows what is left to do).
 fn write_todo() -> Option<PathBuf> {
     let dir = sys::log_path().parent()?.to_path_buf();
     let mut t = String::new();
@@ -523,10 +537,10 @@ pub fn removes_data() -> bool {
 }
 
 /// When the window closes after the last run, nothing of HeMiMizer stays on the PC (the user, 2026-11-18): its folder
-/// "HeMiMizer data", %LOCALAPPDATA%\HeMiMizer (the copy for the restarts, the state between them) and its temporary
-/// files go right away. The exe that runs cannot be deleted while it runs: Windows deletes it at the next restart (as
-/// installers do – no helper process waits for it). On a USB stick the exe and its folder stay (the kit for the next
-/// installation). A Debug build keeps its log in %LOCALAPPDATA%\HeMiMizer (the release writes none).
+/// "HeMiMizer data", %ProgramData%\HeMiMizer (the copy for the restarts, the state between them, the downloads) and its
+/// temporary files go right away. The exe that runs cannot be deleted while it runs: Windows deletes it at the next
+/// restart (as installers do – no helper process waits for it). On a USB stick the exe and its folder stay (the kit for
+/// the next installation). A Debug build keeps its log in %ProgramData%\HeMiMizer (the release writes none).
 pub fn remove_myself() {
     let exe = std::env::current_exe().unwrap_or_default();
     let original = original_dir();
@@ -535,7 +549,7 @@ pub fn remove_myself() {
     sys::log(&format!("removing HeMiMizer (its folder too: {fixed})"));
     let home = original.join(crate::config::HOME);
     if cfg!(debug_assertions) && fixed {
-        // Debug: the log into %LOCALAPPDATA%\HeMiMizer before its folder goes
+        // Debug: the log into %ProgramData%\HeMiMizer before its folder goes
         sys::log_close();
         let _ = std::fs::create_dir_all(&local);
         if let Ok(rd) = std::fs::read_dir(&home) {
@@ -544,8 +558,13 @@ pub fn remove_myself() {
             }
         }
     }
-    for d in [std::env::temp_dir().join("HeMiMizer"), sys::work_dir(), local.join("app")] {
+    // %LOCALAPPDATA%\HeMiMizer: where HeMiMizer up to 1.5.0 kept the copy for the restarts and its state
+    let old_local = PathBuf::from(sys::env("LOCALAPPDATA", "")).join("HeMiMizer");
+    for d in [std::env::temp_dir().join("HeMiMizer"), sys::work_dir(), local.join("app"), old_local.join("app")] {
         let _ = std::fs::remove_dir_all(d);
+    }
+    if !cfg!(debug_assertions) {
+        let _ = std::fs::remove_dir_all(&old_local);
     }
     let _ = std::fs::remove_file(std::env::temp_dir().join("HeMiMizer-ThirdPartyNotices.txt"));
     if cfg!(debug_assertions) {
@@ -598,8 +617,11 @@ pub fn clear_resume() {
 }
 
 /// Saves the steps that are left and schedules HeMiMizer to continue after the next sign-in. HeMiMizer and its
-/// config folder are copied to %LOCALAPPDATA%\HeMiMizer\app first – a USB stick or a network drive may be gone then.
+/// config folder are copied to %ProgramData%\HeMiMizer\app first – a USB stick or a network drive may be gone then.
+/// The task runs that copy as administrator: so it lies in the protected folder, which only administrators may
+/// change (in %LOCALAPPDATA% any program of the user could have replaced it – audit 2026-11-24).
 fn schedule_resume(ids: &[&str]) -> Result<(), String> {
+    sys::protect_state_dir()?;
     let app = data_dir().join("app");
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let target = app.join("HeMiMizer.exe");
@@ -627,7 +649,8 @@ fn schedule_resume(ids: &[&str]) -> Result<(), String> {
          $p=New-ScheduledTaskPrincipal -UserId $u -LogonType Interactive -RunLevel Highest; \
          $s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 0); \
          Register-ScheduledTask -TaskName '{TASK}' -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null",
-        exe = target.display()
+        // a ' in the path (C:\Users\O'Neil) doubled for PowerShell
+        exe = target.display().to_string().replace('\'', "''")
     ))?;
     Ok(())
 }
@@ -660,7 +683,7 @@ pub fn run(chosen: Vec<usize>, passwords: Vec<(String, String, String)>, tx: Sen
                 continue;
             }
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (s.run)(&ctx)))
-                .unwrap_or_else(|_| Err(tr("The step crashed.", "Krok spadl.").into()));
+                .unwrap_or_else(|_| Err(tr("The step failed unexpectedly.", "Krok neočekávaně selhal.").into()));
             let secs = started.elapsed().as_secs();
             // offline and its installer is not in the backup: again after the internet (and the downloads) – when
             // that is still ahead; else it is an error like any other

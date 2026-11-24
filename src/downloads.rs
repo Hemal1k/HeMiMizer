@@ -119,7 +119,7 @@ pub fn download_all(c: &Ctx) -> Res {
                 }
                 let left = failed.len().saturating_sub(by_hand);
                 if left > 0 {
-                    c.note(format!("{} {left}", tr("Installers not downloaded (their steps try again or fail):", "NestaĹľenĂ© instalaÄŤky (jejich kroky to zkusĂ­ znovu nebo selĹľou):")));
+                    c.note(format!("{} {left}", tr("Installers not downloaded (their steps try again or fail):", "Nestažené instalační programy (jejich kroky to zkusí znovu, nebo selžou):")));
                 }
                 break;
             }
@@ -127,9 +127,9 @@ pub fn download_all(c: &Ctx) -> Res {
     }
     Ok(format!(
         "{} {done}{}{}",
-        tr("Downloaded:", "StaĹľeno:"),
-        if skipped > 0 { format!(", {} {skipped}", tr("already the newest:", "uĹľ nejnovÄ›jĹˇĂ­:")) } else { String::new() },
-        if by_hand > 0 { format!(", {} {by_hand}", tr("chosen by hand:", "ruÄŤnÄ›:")) } else { String::new() }
+        tr("Downloaded:", "Staženo:"),
+        if skipped > 0 { format!(", {} {skipped}", tr("already the newest:", "už nejnovější:")) } else { String::new() },
+        if by_hand > 0 { format!(", {} {by_hand}", tr("chosen by hand:", "vybráno ručně:")) } else { String::new() }
     ))
 }
 
@@ -147,12 +147,12 @@ pub fn prepared_ids(prefix: &str) -> Vec<String> {
 }
 
 /// The step "Installers from the backup": the installers the backup downloaded (the folder `installers` next to
-/// HeMiMizer.exe) are copied to this PC â€“ the network drive or the USB stick may be gone after the restart â€“ and the
+/// HeMiMizer.exe) are copied to this PC – the network drive or the USB stick may be gone after the restart – and the
 /// install steps take them instead of downloading. The AMD drivers are taken from that folder directly.
 pub fn import_offline(c: &Ctx) -> Res {
     let list = crate::backup::offline();
     if list.is_empty() {
-        return Ok(tr("No installers in the backup â€“ they are downloaded later", "V zĂˇloze nejsou instalaÄŤky â€“ stĂˇhnou se pozdÄ›ji").into());
+        return Ok(tr("No installers in the backup – they are downloaded later", "V záloze nejsou instalační programy – stáhnou se později").into());
     }
     let mut n = 0;
     for (id, file, version) in list {
@@ -160,11 +160,11 @@ pub fn import_offline(c: &Ctx) -> Res {
             continue;
         }
         let target = sys::work_dir().join(file.file_name().unwrap_or_default());
-        c.log(format!("{} {}", tr("Copying", "KopĂ­ruji"), file.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default()));
+        c.log(format!("{} {}", tr("Copying", "Kopíruji"), file.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default()));
         if std::fs::copy(&file, &target).is_ok() {
             record(&id, &target, &version);
             n += 1;
         }
     }
-    Ok(format!("{} {n}", tr("Installers ready:", "PĹ™ipravenĂ© instalaÄŤky:")))
+    Ok(format!("{} {n}", tr("Installers ready:", "Připravené instalační programy:")))
 }

@@ -106,13 +106,13 @@ impl HeMiMizerApp {
         let s = &mut self.iso;
         section(ui, &p, "Windows 11 ISO");
         card(ui, &p, |ui| {
-            if Self::path_row(ui, &p, &mut s.iso, "The .iso of Windows 11 from Microsoft") {
+            if Self::path_row(ui, &p, &mut s.iso, "The Windows 11 .iso from Microsoft") {
                 acts.push(Action::IsoBrowse);
             }
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("No ISO yet?").size(12.0).color(p.text3));
-                if Btn::new("Download from Microsoft").icon(glyph::OPEN_LINK).subtle().tip("The page of Microsoft: choose the language there, then choose the .iso here").show(ui, &p).clicked() {
+                if Btn::new("Download from Microsoft").icon(glyph::OPEN_LINK).subtle().tip("Microsoft's page: choose the language there, then choose the .iso here").show(ui, &p).clicked() {
                     acts.push(Action::Open("https://www.microsoft.com/software-download/windows11".into()));
                 }
             });
@@ -172,7 +172,7 @@ impl HeMiMizerApp {
             }
             section(ui, &p, "Add");
             card(ui, &p, |ui| {
-                ui.label(RichText::new("Drivers (a folder with .inf files, e.g. of a network card or a disk controller)").size(13.0).color(p.text));
+                ui.label(RichText::new("Drivers (a folder with .inf files, e.g. for a network card or a disk controller)").size(13.0).color(p.text));
                 if Self::path_row(ui, &p, &mut s.drivers, "Empty = none") {
                     acts.push(Action::IsoDrivers);
                 }

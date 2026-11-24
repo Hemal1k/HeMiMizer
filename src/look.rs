@@ -1,5 +1,5 @@
-//! The look all HeMi apps in Rust share: the theme (automatic / light / dark) and the language (automatic / English /
-//! Czech), chosen at the top of the settings and kept in %AppData%\HeMi\HeMiMizer\appearance.ini.
+//! The look all HeMi apps in Rust share: the theme (automatic / light / dark), chosen at the top of the settings and
+//! kept in %AppData%\HeMi\HeMiMizer\appearance.ini. The language is kept too but not offered (English only).
 
 use std::path::PathBuf;
 

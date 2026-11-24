@@ -113,7 +113,7 @@ pub const ALL: &[Tweak] = &[
     t("start-account", Taskbar, "No account notifications in Start", "No reminders to back up or to sign in", false, |_| sys::set_dword(Root::Hkcu, ADV, "Start_AccountNotifications", 0), || {
         is(Root::Hkcu, ADV, "Start_AccountNotifications", 0)
     }),
-    t("start-pins", Taskbar, "More pins in Start", "A row more for your pins, less for Recommended", false, |_| sys::set_dword(Root::Hkcu, ADV, "Start_Layout", 1), || {
+    t("start-pins", Taskbar, "More pins in Start", "One more row for your pins, less for Recommended", false, |_| sys::set_dword(Root::Hkcu, ADV, "Start_Layout", 1), || {
         is(Root::Hkcu, ADV, "Start_Layout", 1)
     }),
     // ---------------------------------------------------------------- File Explorer
@@ -167,8 +167,8 @@ pub const ALL: &[Tweak] = &[
     t("long-paths", System, "Long file paths", "Paths over 260 characters work – torrents and projects with deep folders", false, |_| {
         sys::set_dword(Root::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "LongPathsEnabled", 1)
     }, || is(Root::Hklm, r"SYSTEM\CurrentControlSet\Control\FileSystem", "LongPathsEnabled", 1)),
-    t("network", System, "Home network private", "Other PCs and the NAS are seen (network discovery)", false, network_private, || None),
-    t("dns", System, "Encrypted DNS", "Cloudflare 1.1.1.1 over HTTPS – the provider does not see the pages you visit", false, dns, || None),
+    t("network", System, "Home network private", "Every connected network becomes Private – other PCs and the NAS are seen (network discovery)", false, network_private, || None),
+    t("dns", System, "Encrypted DNS", "Cloudflare 1.1.1.1 over HTTPS for all adapters – your internet provider does not see the sites you visit", false, dns, || None),
 ];
 
 pub fn find(id: &str) -> Option<&'static Tweak> {
