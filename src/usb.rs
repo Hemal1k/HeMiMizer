@@ -203,13 +203,10 @@ fn make_from(o: &Options, src: &Path, log: &dyn Fn(String)) -> Result<String, St
         return Err("This ISO is not a Windows installation (no setup.exe, no sources).".into());
     }
     // FAT32: every file over 4 GB but install.wim (split by DISM) makes it impossible – said before the disk is wiped
-    if !o.ntfs {
-        if let Some(big) = big_files(src).into_iter().find(|p| !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("install.wim"))) {
-            return Err(format!(
-                "{} is bigger than 4 GB and FAT32 cannot hold it – choose NTFS.",
-                big.strip_prefix(src).unwrap_or(&big).display()
-            ));
-        }
+    if !o.ntfs
+        && let Some(big) = big_files(src).into_iter().find(|p| !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("install.wim")))
+    {
+        return Err(format!("{} is bigger than 4 GB and FAT32 cannot hold it – choose NTFS.", big.strip_prefix(src).unwrap_or(&big).display()));
     }
     log("Preparing the USB disk".into());
     let style = if o.gpt { "GPT" } else { "MBR" };
@@ -369,6 +366,7 @@ fn used(root: &Path) -> u64 {
     use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
     let w = sys::wide(&root.display().to_string());
     let (mut free, mut total) = (0u64, 0u64);
+    // SAFETY: `w` ends with a NUL; the out pointers are valid locals (or null, which the API allows)
     unsafe { GetDiskFreeSpaceExW(w.as_ptr(), std::ptr::null_mut(), &mut total, &mut free) };
     total.saturating_sub(free)
 }

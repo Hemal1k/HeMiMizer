@@ -148,6 +148,9 @@ enum Action {
     ContinueDownloads,
 }
 
+/// A job in the background: None = not asked, Some(None) = running, Some(Some(result)) = done.
+type Job<T> = std::sync::Arc<std::sync::Mutex<Option<Option<Result<T, String>>>>>;
+
 pub struct HeMiMizerApp {
     steps: Vec<Step>,
     /// The indices of the steps of this run, in order.
@@ -194,14 +197,14 @@ pub struct HeMiMizerApp {
     /// programs HeMiMizer does not install whose settings are on this PC (Adobe, DaVinci Resolve…)
     found_apps: Vec<&'static str>,
     /// packing the backup into a .zip: None = not asked, Some(None) = packing, Some(Some(result)) = done
-    pack: std::sync::Arc<std::sync::Mutex<Option<Option<Result<String, String>>>>>,
+    pack: Job<String>,
     /// the password of the backup, typed twice on its last page (empty = not protected), and how the encryption went
     seal_pw: String,
     seal_pw2: String,
     sealed: Option<Result<String, String>>,
     /// a protected backup at the start: the password typed, and the unlocking (None = not yet, Some(None) = running)
     unlock_pw: String,
-    unlock: std::sync::Arc<std::sync::Mutex<Option<Option<Result<(), String>>>>>,
+    unlock: Job<()>,
     /// this PC has Wi-Fi networks saved (the backup offers them)
     has_wifi: bool,
     /// the page "Make a Windows USB stick"
@@ -389,12 +392,11 @@ impl HeMiMizerApp {
                     self.phase = Phase::BackedUp;
                     // a backup in another folder: HeMiMizer goes along, the setup is started from there
                     let to = config::save_to();
-                    if to != config::exe_dir() {
-                        if let Ok(exe) = std::env::current_exe() {
-                            if let Err(e) = std::fs::copy(&exe, to.join("HeMiMizer.exe")) {
-                                sys::log(&format!("copy HeMiMizer.exe to {}: {e}", to.display()));
-                            }
-                        }
+                    if to != config::exe_dir()
+                        && let Ok(exe) = std::env::current_exe()
+                        && let Err(e) = std::fs::copy(&exe, to.join("HeMiMizer.exe"))
+                    {
+                        sys::log(&format!("copy HeMiMizer.exe to {}: {e}", to.display()));
                     }
                     self.offline = crate::backup::offline().len();
                 }
@@ -745,6 +747,7 @@ impl HeMiMizerApp {
 
     /// The head of a section that folds: an arrow, an icon, the title and how many are on; a click folds or unfolds it.
     /// Returns whether it is open.
+    #[allow(clippy::too_many_arguments)]
     fn fold_head(&self, ui: &mut egui::Ui, icon: Option<char>, title: &str, on: usize, all: usize, force_open: bool, acts: &mut Vec<Action>) -> bool {
         let p = self.p;
         let open = force_open || !self.folded.contains(title);
@@ -835,7 +838,16 @@ impl HeMiMizerApp {
 
     /// The Wi-Fi networks go into the backup (their passwords: only into a protected one).
     fn wifi_on(&self) -> bool {
-        self.backup_items.iter().position(|it| it.id == "wifi").is_some_and(|i| self.backup_on[i] && self.backup_visible("wifi"))
+        self.backup_item_on("wifi")
+    }
+
+    fn backup_item_on(&self, id: &str) -> bool {
+        self.backup_items.iter().position(|it| it.id == id).is_some_and(|i| self.backup_on[i] && self.backup_visible(id))
+    }
+
+    /// Parts of the backup with saved logins (servers, user names, sometimes passwords): a warning without a password.
+    fn logins_on(&self) -> bool {
+        ["drives", "filezilla", "winscp", "putty", "thunderbird", "git"].iter().any(|id| self.backup_item_on(id))
     }
 
     /// The password of the backup: typed the same twice (or none); the Wi-Fi passwords need one.
@@ -1597,6 +1609,12 @@ impl HeMiMizerApp {
                 ui.label(RichText::new("The two passwords are not the same.").size(12.0).color(p.critical));
             } else if self.wifi_on() && self.seal_pw.is_empty() {
                 ui.label(RichText::new("The Wi-Fi passwords go only into a protected backup – set a password, or leave out Wi-Fi networks on the Take along page.").size(12.0).color(p.caution));
+            } else if self.logins_on() && self.seal_pw.is_empty() {
+                ui.label(
+                    RichText::new("Without a password the backup is readable by anyone who has it – it contains saved logins (network drives, FileZilla, WinSCP, PuTTY, Thunderbird or Git).")
+                        .size(12.0)
+                        .color(p.caution),
+                );
             } else if !self.seal_pw.is_empty() {
                 ui.label(RichText::new("Keep the password safe – without it the backup cannot be opened.").size(12.0).color(p.text3));
             }
@@ -2389,9 +2407,10 @@ impl HeMiMizerApp {
                 }
                 Action::Unlock => {
                     *self.unlock.lock().unwrap() = Some(None);
-                    let (state, pw, ctx) = (self.unlock.clone(), self.unlock_pw.clone(), ctx.clone());
+                    let (state, mut pw, ctx) = (self.unlock.clone(), self.unlock_pw.clone(), ctx.clone());
                     std::thread::spawn(move || {
                         let r = crate::crypto::unseal(&pw);
+                        crate::crypto::wipe(&mut pw);
                         let ok = r.is_ok();
                         *state.lock().unwrap() = Some(Some(r));
                         // opened: HeMiMizer starts again, now with the settings of the backup
@@ -2462,10 +2481,10 @@ impl HeMiMizerApp {
                     }
                 }
                 Action::BrowseFile(i) => {
-                    if let Some(list) = self.need_files.as_mut() {
-                        if let Some(f) = pick_exe(&list[i].3) {
-                            list[i].3 = f;
-                        }
+                    if let Some(list) = self.need_files.as_mut()
+                        && let Some(f) = pick_exe(&list[i].3)
+                    {
+                        list[i].3 = f;
                     }
                 }
                 Action::PickOc(i) => {
@@ -2517,6 +2536,10 @@ impl eframe::App for HeMiMizerApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         // a download of Windows that runs ends with the window
         crate::msiso::stop();
+        // the typed passwords do not stay in memory
+        crate::crypto::wipe(&mut self.seal_pw);
+        crate::crypto::wipe(&mut self.seal_pw2);
+        crate::crypto::wipe(&mut self.unlock_pw);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

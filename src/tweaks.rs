@@ -424,6 +424,7 @@ fn game_dvr(_c: &Ctx) -> Result<(), String> {
 fn mouse(_c: &Ctx) -> Result<(), String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_SETMOUSE, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SystemParametersInfoW};
     let mut m = [0i32; 3];
+    // SAFETY: SPI_SETMOUSE reads an array of three ints, `m` is one
     if unsafe { SystemParametersInfoW(SPI_SETMOUSE, 0, m.as_mut_ptr() as _, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE) } == 0 {
         for (n, v) in [("MouseSpeed", "0"), ("MouseThreshold1", "0"), ("MouseThreshold2", "0")] {
             sys::set_sz(Root::Hkcu, r"Control Panel\Mouse", n, v)?;

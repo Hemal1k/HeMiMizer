@@ -109,12 +109,13 @@ pub fn run(chosen: Vec<usize>, password: Option<String>, tx: Sender<Event>, repa
             repaint();
         }
         // protected with the password: the personal parts encrypted (a backup without one replaces an older sealed one)
-        if let Some(pw) = password.filter(|p| !p.is_empty()) {
+        if let Some(mut pw) = password.filter(|p| !p.is_empty()) {
             let log = |t: String| {
                 let _ = tx.send(Event::Log(t));
                 repaint();
             };
             let r = crate::crypto::seal(&pw, &log);
+            crate::crypto::wipe(&mut pw);
             sys::log(&format!("seal: {r:?}"));
             let _ = tx.send(Event::Sealed(r));
         }

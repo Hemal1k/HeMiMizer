@@ -118,10 +118,10 @@ fn find(prefix: &str, ext: &str) -> Option<PathBuf> {
 /// The wallpaper: (file name, data); None when the backup has none.
 pub fn wallpaper() -> Option<(String, Vec<u8>)> {
     for ext in [".jpg", ".jpeg", ".png", ".bmp"] {
-        if let Some(p) = find("wallpaper", ext) {
-            if let Ok(d) = std::fs::read(&p) {
-                return Some((format!("wallpaper{ext}"), d));
-            }
+        if let Some(p) = find("wallpaper", ext)
+            && let Ok(d) = std::fs::read(&p)
+        {
+            return Some((format!("wallpaper{ext}"), d));
         }
     }
     has("wallpaper.jpg").then(|| ("wallpaper.jpg".into(), bytes("wallpaper.jpg")))
@@ -129,10 +129,11 @@ pub fn wallpaper() -> Option<(String, Vec<u8>)> {
 
 /// The VLC skin: (file name, data); None when the backup has none.
 pub fn vlc_skin() -> Option<(String, Vec<u8>)> {
-    if let Some(p) = find("", ".vlt") {
-        if let Ok(d) = std::fs::read(&p) {
-            return Some((p.file_name().unwrap().to_string_lossy().into_owned(), d));
-        }
+    if let Some(p) = find("", ".vlt")
+        && let Ok(d) = std::fs::read(&p)
+    {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "skin.vlt".into());
+        return Some((name, d));
     }
     has("HeMi-Dark-blue-140.vlt").then(|| ("HeMi-Dark-blue-140.vlt".into(), bytes("HeMi-Dark-blue-140.vlt")))
 }
@@ -272,6 +273,8 @@ fn owner_sid(path: &Path) -> Option<String> {
     use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT};
     use windows_sys::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
     let w = sys::wide(&path.display().to_string());
+    // SAFETY: `w` ends with a NUL; the out pointers are valid locals; `owner` points into `sd`, which is freed after
+    // its last use; the SID string ends with a NUL and is freed with LocalFree
     unsafe {
         let mut owner: PSID = std::ptr::null_mut();
         let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
@@ -385,7 +388,11 @@ fn cap_vlc() -> Result<String, String> {
             out.push('\n');
         }
     }
-    if let Some(s) = skin.filter(|s| Path::new(s).exists()) {
+    // only a skin file (not a folder such as "C:\")
+    if let Some((s, name)) = skin.filter(|s| Path::new(s).is_file()).and_then(|s| {
+        let name = Path::new(&s).file_name()?.to_string_lossy().into_owned();
+        Some((s, name))
+    }) {
         if let Ok(rd) = std::fs::read_dir(dir()) {
             for e in rd.flatten() {
                 if e.file_name().to_string_lossy().to_lowercase().ends_with(".vlt") {
@@ -393,7 +400,6 @@ fn cap_vlc() -> Result<String, String> {
                 }
             }
         }
-        let name = Path::new(&s).file_name().unwrap().to_string_lossy().into_owned();
         write(&name, &std::fs::read(&s).map_err(|e| e.to_string())?)?;
         out = out.replace(&s, &format!(r"{{VLC}}\skins\{name}"));
     }
@@ -503,7 +509,7 @@ fn reg_export(key: &str) -> Result<String, String> {
     sys::run("reg.exe", &["export", key, &f.display().to_string(), "/y"])?;
     let raw = std::fs::read(&f).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&f);
-    let u: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let u: Vec<u16> = raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
     Ok(String::from_utf16_lossy(&u).trim_start_matches('\u{feff}').to_string())
 }
 
@@ -525,10 +531,10 @@ fn reg_values(text: &str, key: &str, keep: impl Fn(&str) -> bool) -> Vec<String>
             buf.push_str("\r\n");
             continue;
         }
-        if let Some(name) = buf.strip_prefix('"').and_then(|r| r.split('"').next()) {
-            if keep(name) {
-                out.push(buf.clone());
-            }
+        if let Some(name) = buf.strip_prefix('"').and_then(|r| r.split('"').next())
+            && keep(name)
+        {
+            out.push(buf.clone());
         }
         buf.clear();
     }

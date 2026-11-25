@@ -78,6 +78,7 @@ pub fn wallpaper(_c: &Ctx) -> Res {
     sys::set_sz(Root::Hkcu, r"Control Panel\Desktop", "TileWallpaper", "0")?;
     sys::set_dword(Root::Hkcu, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers", "BackgroundType", 0)?;
     let w = sys::wide(&path);
+    // SAFETY: SPI_SETDESKWALLPAPER reads the path from `w`, which ends with a NUL
     let ok = unsafe { SystemParametersInfoW(SPI_SETDESKWALLPAPER, 0, w.as_ptr() as _, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE) };
     if ok == 0 {
         return Err(tr("Windows did not accept the wallpaper.", "Windows tapetu nepřijal.").into());
@@ -231,7 +232,7 @@ pub fn defender(c: &Ctx) -> Res {
             }
             // the exclusions of the old PC: named in the log of the step, so that the user sees them
             c.log(format!("{} {name}: {}", tr("From the backup:", "Ze zálohy:"), value.replace(';', ", ")));
-            value.split(';').map(|v| quote(v)).collect::<Vec<_>>().join(",")
+            value.split(';').map(&quote).collect::<Vec<_>>().join(",")
         } else if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") {
             format!("${}", value.to_lowercase())
         } else if value.parse::<i64>().is_ok() {
@@ -303,7 +304,8 @@ pub fn defender(c: &Ctx) -> Res {
 /// Only HeMiMizer.exe itself, not the folder it lies in (that was often the whole Downloads folder), and every exclusion
 /// added is written down: after a restart HeMiMizer may run from another place, and the end of the run removes all of
 /// them by the list, not just the ones of the current path (audit 2026-11-24: the first ones stayed for good).
-pub fn self_exclusion(on: bool) {
+/// false when Defender refused the change (no Defender at all counts as done).
+pub fn self_exclusion(on: bool) -> bool {
     let exe = std::env::current_exe().map(|e| e.display().to_string()).unwrap_or_default();
     let mut paths = vec![sys::work_dir().display().to_string(), std::env::temp_dir().join("HeMiMizer").display().to_string()];
     if !exe.is_empty() {
@@ -329,10 +331,8 @@ pub fn self_exclusion(on: bool) {
         }
     }
     // HeMiMizer up to 1.5.0 excluded the whole folder of the exe: taken away too (removing a missing one does nothing)
-    if !on {
-        if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.display().to_string())) {
-            paths.push(d);
-        }
+    if !on && let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.display().to_string())) {
+        paths.push(d);
     }
     paths.retain(|p| !p.is_empty());
     processes.retain(|p| !p.is_empty());
@@ -349,10 +349,15 @@ pub fn self_exclusion(on: bool) {
         quote(&paths),
         quote(&processes)
     ));
-    if !on && r.is_ok_and(|t| !t.contains("failed:")) {
+    let ok = r.as_ref().is_ok_and(|t| !t.contains("failed:"));
+    if !ok {
+        sys::log(&format!("Defender exclusions ({verb}): {r:?}"));
+    }
+    if !on && ok {
         let _ = std::fs::remove_file(&record);
         let _ = std::fs::remove_file(&old_record);
     }
+    ok
 }
 
 // ---------------------------------------------------------------- Microsoft Store
@@ -499,23 +504,6 @@ pub fn startup_apps(_c: &Ctx) -> Res {
     Ok(done.join(", "))
 }
 
-// ---------------------------------------------------------------- System Restore
-
-/// System Restore off on every drive and its restore points deleted; the policy keeps it off.
-pub fn restore_off(c: &Ctx) -> Res {
-    c.log(tr("Turning off System Restore", "Vypínám obnovu systému"));
-    sys::ps("Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { Disable-ComputerRestore -Drive ($_.DeviceID + '\\') -ErrorAction SilentlyContinue }")?;
-    sys::dwords(Root::Hklm, r"SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore", &[("DisableSR", 1), ("DisableConfig", 1)])?;
-    c.log(tr("Deleting the restore points", "Mažu body obnovení"));
-    // vssadmin ends with an error when there is nothing to delete
-    let _ = sys::exec("vssadmin.exe", &["delete", "shadows", "/all", "/quiet"]);
-    let on = sys::ps("(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\SystemRestore').RPSessionInterval").unwrap_or_default();
-    if on.trim() == "1" {
-        return Err(tr("Windows still reports System Restore as on.", "Windows stále hlásí obnovu systému jako zapnutou.").into());
-    }
-    Ok(tr("Off, restore points deleted", "Vypnuto, body obnovení smazány").into())
-}
-
 // ---------------------------------------------------------------- clean-up
 
 fn free_c() -> u64 {
@@ -584,8 +572,10 @@ pub fn display(c: &Ctx) -> Res {
     };
     let mut done = Vec::new();
     for i in 0.. {
+        // SAFETY: DISPLAY_DEVICEW is plain data, all zeros is valid
         let mut dd: DISPLAY_DEVICEW = unsafe { zeroed() };
         dd.cb = size_of::<DISPLAY_DEVICEW>() as u32;
+        // SAFETY: `dd` is a valid out pointer with its size in `cb`
         if unsafe { EnumDisplayDevicesW(std::ptr::null(), i, &mut dd, 0) } == 0 {
             break;
         }
@@ -593,15 +583,19 @@ pub fn display(c: &Ctx) -> Res {
             continue;
         }
         let name = dd.DeviceName;
+        // SAFETY: DEVMODEW is plain data, all zeros is valid
         let mut cur: DEVMODEW = unsafe { zeroed() };
         cur.dmSize = size_of::<DEVMODEW>() as u16;
+        // SAFETY: `name` ends with a NUL (DeviceName from Windows); `cur` is valid with its size in `dmSize`
         if unsafe { EnumDisplaySettingsW(name.as_ptr(), ENUM_CURRENT_SETTINGS, &mut cur) } == 0 {
             continue;
         }
         let mut best = cur.dmDisplayFrequency;
         for j in 0.. {
+            // SAFETY: as above
             let mut m: DEVMODEW = unsafe { zeroed() };
             m.dmSize = size_of::<DEVMODEW>() as u16;
+            // SAFETY: as above
             if unsafe { EnumDisplaySettingsW(name.as_ptr(), j, &mut m) } == 0 {
                 break;
             }
@@ -613,6 +607,7 @@ pub fn display(c: &Ctx) -> Res {
             c.log(format!("{}×{} → {best} Hz", cur.dmPelsWidth, cur.dmPelsHeight));
             cur.dmDisplayFrequency = best;
             cur.dmFields = DM_DISPLAYFREQUENCY;
+            // SAFETY: `name` ends with a NUL; `cur` is a DEVMODEW Windows filled, only its frequency changed
             let r = unsafe { ChangeDisplaySettingsExW(name.as_ptr(), &cur, std::ptr::null_mut(), CDS_UPDATEREGISTRY, std::ptr::null()) };
             if r != DISP_CHANGE_SUCCESSFUL {
                 return Err(format!("{} {best} Hz ({r})", tr("The monitor did not accept", "Monitor nepřijal")));
@@ -626,17 +621,6 @@ pub fn display(c: &Ctx) -> Res {
         c.reboot();
     }
     Ok(done.join(", "))
-}
-
-// ---------------------------------------------------------------- apps
-
-pub fn calculator(_c: &Ctx) -> Res {
-    sys::ps(
-        "try { Get-AppxPackage -AllUsers -Name Microsoft.WindowsCalculator | Remove-AppxPackage -AllUsers -ErrorAction Stop } catch { \"user: $_\" }; \
-         try { Get-AppxProvisionedPackage -Online | Where-Object DisplayName -eq 'Microsoft.WindowsCalculator' | \
-         Remove-AppxProvisionedPackage -Online -ErrorAction Stop | Out-Null } catch { \"provisioned: $_\" }",
-    )?;
-    Ok(String::new())
 }
 
 // ---------------------------------------------------------------- mouse
@@ -658,8 +642,10 @@ impl Mouse {
         use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETMOUSESPEED, SPI_GETWHEELSCROLLCHARS, SPI_GETWHEELSCROLLLINES, SystemParametersInfoW};
         let get = |action, default: u32| {
             let mut v = 0u32;
+            // SAFETY: these SPI_GET actions write one u32 into `v`
             if unsafe { SystemParametersInfoW(action, 0, (&mut v as *mut u32).cast(), 0) } != 0 { v } else { default }
         };
+        // SAFETY: no arguments, it only returns a number
         let double = unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
         Mouse { speed: get(SPI_GETMOUSESPEED, 10), lines: get(SPI_GETWHEELSCROLLLINES, 3), chars: get(SPI_GETWHEELSCROLLCHARS, 3), double }
     }
@@ -683,6 +669,7 @@ pub fn mouse(_c: &Ctx) -> Res {
         return Ok("Not in the backup".into());
     };
     let save = SPIF_UPDATEINIFILE | SPIF_SENDCHANGE;
+    // SAFETY: these SPI_SET actions take their value by number (pvParam or uiParam), no pointer is read
     unsafe {
         // the speed goes in pvParam itself, the others in uiParam
         SystemParametersInfoW(SPI_SETMOUSESPEED, 0, m.speed as usize as _, save);
@@ -711,6 +698,7 @@ pub fn rename_pc(c: &Ctx) -> Res {
         return Ok(format!("{} {name}", tr("The PC is already called", "PC se už jmenuje")));
     }
     let n = sys::wide(name);
+    // SAFETY: `n` ends with a NUL
     if unsafe { SetComputerNameExW(ComputerNamePhysicalDnsHostname, n.as_ptr()) } == 0 {
         return Err(std::io::Error::last_os_error().to_string());
     }
@@ -772,20 +760,22 @@ pub fn fonts(c: &Ctx) -> Res {
             continue;
         }
         let to = win_fonts.join(file);
-        if !to.exists() {
-            if let Err(e) = std::fs::copy(dir.join(file), &to) {
-                failed.push(format!("{file}: {e}"));
-                continue;
-            }
+        if !to.exists()
+            && let Err(e) = std::fs::copy(dir.join(file), &to)
+        {
+            failed.push(format!("{file}: {e}"));
+            continue;
         }
         if let Err(e) = sys::set_sz(Root::Hklm, key, name, file) {
             failed.push(e);
             continue;
         }
         let w = sys::wide(&to.display().to_string());
+        // SAFETY: `w` ends with a NUL
         unsafe { AddFontResourceW(w.as_ptr()) };
         n += 1;
     }
+    // SAFETY: WM_FONTCHANGE carries no pointers; the result pointer may be null
     unsafe { SendMessageTimeoutW(HWND_BROADCAST, WM_FONTCHANGE, 0, 0, SMTO_ABORTIFHUNG, 2000, std::ptr::null_mut()) };
     let text = format!("{n} fonts");
     if failed.is_empty() { Ok(text) } else { Err(format!("{text}\n{}", failed.join("\n"))) }

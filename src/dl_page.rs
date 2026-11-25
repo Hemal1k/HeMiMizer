@@ -18,8 +18,11 @@ pub struct DlUi {
     pub lang: String,
     pub folder: String,
     /// (bytes done, total, None while it runs / the result: the ISO)
-    pub state: Arc<Mutex<Option<(u64, u64, Option<Result<std::path::PathBuf, String>>)>>>,
+    pub state: Arc<Mutex<Option<Progress>>>,
 }
+
+/// (bytes done, total, None while it runs / the result: the ISO)
+pub type Progress = (u64, u64, Option<Result<std::path::PathBuf, String>>);
 
 impl DlUi {
     pub fn new() -> DlUi {

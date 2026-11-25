@@ -4,6 +4,8 @@
 //   HeMiMizer.exe --capture  saves the settings of this PC to the folder config next to the exe (no Wi-Fi passwords)
 //   HeMiMizer.exe --check    shows the newest versions of the programs and drivers
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// every unsafe block says why it is sound (audit 2026-11-24)
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 mod app;
 mod appdata;
@@ -42,6 +44,7 @@ use i18n::tr;
 fn message(title: &str, text: &str) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONINFORMATION, MB_OK, MessageBoxW};
     let (t, m) = (sys::wide(title), sys::wide(text));
+    // SAFETY: both strings end with a NUL and live until the call returns
     unsafe { MessageBoxW(std::ptr::null_mut(), m.as_ptr(), t.as_ptr(), MB_OK | MB_ICONINFORMATION) };
     if cfg!(debug_assertions) {
         println!("{text}");
@@ -112,7 +115,6 @@ fn main() -> eframe::Result {
         message(tr("HeMiMizer – settings captured", "HeMiMizer – nastavení zachyceno"), &text);
         return Ok(());
     }
-    // Debug builds only: try the removal at the end on a copy of the exe
     // Debug builds only: the download links of Microsoft without the window (--test-msiso)
     if cfg!(debug_assertions) && args.first().map(String::as_str) == Some("--test-msiso") {
         let r = msiso::start(msiso::Product::Windows11).and_then(|s| {

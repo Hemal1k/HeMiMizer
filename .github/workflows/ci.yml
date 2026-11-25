@@ -1,0 +1,30 @@
+# Every push and pull request: clippy without warnings and the unit tests (they change nothing on the PC; a Debug build
+# runs as the user, so the tests need no administrator).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Rust
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component clippy --target x86_64-pc-windows-msvc
+          rustup default 1.99.1
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked

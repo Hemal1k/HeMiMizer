@@ -189,7 +189,9 @@ fn vlc_settings(c: &Ctx) -> Result<(), String> {
     std::fs::create_dir_all(&cfg).map_err(|e| e.to_string())?;
     let rc = cfg.join("vlcrc");
     if rc.exists() {
-        let _ = std::fs::rename(&rc, cfg.join("vlcrc.bak"));
+        // the own settings are overwritten only when their copy is there
+        let bak = cfg.join("vlcrc.bak");
+        std::fs::rename(&rc, &bak).map_err(|e| format!("{}: {e}", bak.display()))?;
     }
     std::fs::write(&rc, config::text("vlcrc", false).replace("{VLC}", &dir)).map_err(|e| format!("{}: {e}", rc.display()))
 }
@@ -439,9 +441,12 @@ pub fn saved_user(server: &str) -> Option<String> {
     use windows_sys::Win32::Security::Credentials::{CREDENTIALW, CRED_TYPE_DOMAIN_PASSWORD, CredFree, CredReadW};
     let t = sys::wide(server);
     let mut p: *mut CREDENTIALW = std::ptr::null_mut();
+    // SAFETY: `t` ends with a NUL and `p` is a valid out pointer
     if unsafe { CredReadW(t.as_ptr(), CRED_TYPE_DOMAIN_PASSWORD, 0, &mut p) } == 0 || p.is_null() {
         return None;
     }
+    // SAFETY: `p` is the non-null credential CredReadW gave; its UserName is null or ends with a NUL; it is read
+    // before CredFree, once
     let name = unsafe {
         let u = (*p).UserName;
         let s = if u.is_null() { String::new() } else { String::from_utf16_lossy(std::slice::from_raw_parts(u, (0..).take_while(|&i| *u.add(i) != 0).count())) };
@@ -456,6 +461,7 @@ pub fn save_credential(server: &str, user: &str, password: &str) -> Result<(), S
     use windows_sys::Win32::Security::Credentials::{CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_DOMAIN_PASSWORD, CredWriteW};
     let (mut t, mut u) = (sys::wide(server), sys::wide(user));
     let blob: Vec<u16> = password.encode_utf16().collect();
+    // SAFETY: CREDENTIALW is plain data (integers and pointers), all zeros is a valid value
     let mut cred: CREDENTIALW = unsafe { std::mem::zeroed() };
     cred.Type = CRED_TYPE_DOMAIN_PASSWORD;
     cred.TargetName = t.as_mut_ptr();
@@ -463,6 +469,7 @@ pub fn save_credential(server: &str, user: &str, password: &str) -> Result<(), S
     cred.CredentialBlob = blob.as_ptr() as *mut u8;
     cred.CredentialBlobSize = (blob.len() * 2) as u32;
     cred.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    // SAFETY: the strings and the blob `cred` points to live until the call returns; the blob size is its byte length
     if unsafe { CredWriteW(&cred, 0) } == 0 {
         return Err(std::io::Error::last_os_error().to_string());
     }

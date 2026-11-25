@@ -35,10 +35,31 @@ pub fn locked() -> bool {
     sealed_file().is_file() && !config::dir().exists()
 }
 
+/// The rounds a backup may say it has: fewer would be too weak, more would block the window for hours.
+const ROUNDS_OK: std::ops::RangeInclusive<u32> = 100_000..=10_000_000;
+
 fn key(password: &str, salt: &[u8], rounds: u32) -> Aes256Gcm {
     let mut k = [0u8; 32];
     pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password.as_bytes(), salt, rounds, &mut k);
-    Aes256Gcm::new_from_slice(&k).expect("32 bytes")
+    let cipher = Aes256Gcm::new_from_slice(&k).expect("32 bytes");
+    wipe_bytes(&mut k);
+    cipher
+}
+
+/// Overwrites the bytes with zeros (volatile, so the compiler does not leave it out).
+fn wipe_bytes(b: &mut [u8]) {
+    for x in b.iter_mut() {
+        // SAFETY: `x` is a valid, aligned, exclusive reference to one byte.
+        unsafe { std::ptr::write_volatile(x, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+/// A password no longer needed: its bytes overwritten in memory, then emptied.
+pub fn wipe(s: &mut String) {
+    // SAFETY: only zeros are written, and a string of zero bytes is valid UTF-8.
+    wipe_bytes(unsafe { s.as_bytes_mut() });
+    s.clear();
 }
 
 fn nonce(prefix: &[u8; 8], n: u32) -> [u8; 12] {
@@ -107,6 +128,9 @@ fn decrypt_file(from: &Path, to: &Path, password: &str) -> Result<(), String> {
     let salt = &head[4..20];
     let rounds = u32::from_le_bytes(head[20..24].try_into().unwrap_or_default());
     let prefix: [u8; 8] = head[24..32].try_into().unwrap_or_default();
+    if !ROUNDS_OK.contains(&rounds) {
+        return Err("The backup is damaged".into());
+    }
     let cipher = key(password, salt, rounds);
     let mut w = std::io::BufWriter::new(std::fs::File::create(to).map_err(io)?);
     let mut n = 0u32;
@@ -230,5 +254,28 @@ mod tests {
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rounds_out_of_range() {
+        let dir = std::env::temp_dir().join(format!("hmz-rounds-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, b, c) = (dir.join("a"), dir.join("b"), dir.join("c"));
+        std::fs::write(&a, b"data").unwrap();
+        encrypt_file(&a, &b, "secret").unwrap();
+        let mut enc = std::fs::read(&b).unwrap();
+        for bad in [u32::MAX, 1, 0] {
+            enc[20..24].copy_from_slice(&bad.to_le_bytes());
+            std::fs::write(&b, &enc).unwrap();
+            assert_eq!(decrypt_file(&b, &c, "secret").unwrap_err(), "The backup is damaged");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wipe_empties() {
+        let mut s = String::from("secret");
+        wipe(&mut s);
+        assert!(s.is_empty());
     }
 }

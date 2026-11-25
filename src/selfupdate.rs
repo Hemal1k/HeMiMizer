@@ -49,6 +49,11 @@ pub fn check(state: Shared, done: impl Fn() + Send + 'static) {
             v["assets"].as_array().into_iter().flatten().find(|a| a["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name))).and_then(|a| a["browser_download_url"].as_str()).map(String::from)
         };
         let (Some(exe), Some(sums)) = (asset(ASSET), asset("SHA256SUMS.txt")) else { return };
+        // only the files of this repository's releases on GitHub, over HTTPS
+        let ours = |u: &str| u.starts_with(&format!("https://github.com/{REPO}/releases/download/"));
+        if !ours(&exe) || !ours(&sums) {
+            return;
+        }
         *state.lock().unwrap() = State::Available { version: tag.trim_start_matches(['v', 'V']).to_string(), exe, sums };
         done();
     });
@@ -67,6 +72,8 @@ pub fn update(state: Shared, done: impl Fn() + Send + Sync + 'static, quit: impl
                 *st.lock().unwrap() = State::Downloading(d, t);
                 done();
             };
+            // a part left by an interrupted download (maybe of another version) is not continued
+            let _ = std::fs::remove_file(new.with_extension("iso.part"));
             crate::msiso::download(&url, &new, &progress)?;
             let list = crate::sys::fetch(&sums, None)?;
             let want = list
@@ -88,10 +95,14 @@ pub fn update(state: Shared, done: impl Fn() + Send + Sync + 'static, quit: impl
             Ok(me)
         })();
         match r {
-            Ok(me) => {
-                let _ = std::process::Command::new(&me).arg("--updated").current_dir(me.parent().unwrap_or(Path::new("."))).spawn();
-                quit();
-            }
+            Ok(me) => match std::process::Command::new(&me).arg("--updated").current_dir(me.parent().unwrap_or(Path::new("."))).spawn() {
+                Ok(_) => quit(),
+                // the new version is in place but did not start: the window stays and says so
+                Err(e) => {
+                    *state.lock().unwrap() = State::Failed(format!("Updated, but the new version did not start ({e}) – start HeMiMizer again"));
+                    done();
+                }
+            },
             Err(e) => {
                 *state.lock().unwrap() = State::Failed(e);
                 done();

@@ -277,16 +277,6 @@ pub fn all() -> Vec<Step> {
         step!("mouse-settings", Windows, "Mouse", "Myš", "Pointer speed, scrolling and double-click speed from the backup", "Rychlost ukazatele, posouvání a dvojklik ze zálohy", windows::mouse),
         step!("wifi", Windows, "Wi-Fi networks", "Sítě Wi-Fi", "The saved networks from the backup, with their passwords", "Uložené sítě ze zálohy i s hesly", windows::wifi),
         step!("fonts", Windows, "Fonts", "Písma", "The fonts installed on the old PC, from the backup", "Písma nainstalovaná na starém PC, ze zálohy", windows::fonts),
-        step!("calculator", Windows, "Calculator", "Kalkulačka", "Uninstalled", "Odinstalovaná", windows::calculator),
-        step!(
-            "restore",
-            Windows,
-            "System Restore off",
-            "Ochrana systému vypnutá",
-            "No restore points; the existing ones are deleted",
-            "Žádné body obnovení; ty existující se smažou",
-            windows::restore_off
-        ),
         step!(
             "appearance",
             Windows,
@@ -351,8 +341,8 @@ pub fn all() -> Vec<Step> {
     // restart until nothing is left –, and the clean-up last (it also deletes the downloaded updates)
     const ORDER: &[&str] = &[
         "restore-point", "offline", "wifi", "drives", "no-wu-drivers", "chipset", "gpu", "gpu-settings", "display", "7zip", "vlc", "brave", "steam", "qbittorrent", "programs",
-        "app-settings", "fonts", "runtimes", "appearance", "wallpaper", "explorer", "tweaks", "mouse-settings", "defender", "calculator",
-        "hibernation", "restore", "startup", "folders", "pc-name", "microsoft-apps", "xbox-apps", "ad-software", "internet", "downloads", "hemidock", "store", "pins", "shortcuts", "features", "windows-update", "cleanup",
+        "app-settings", "fonts", "runtimes", "appearance", "wallpaper", "explorer", "tweaks", "mouse-settings", "defender",
+        "hibernation", "startup", "folders", "pc-name", "microsoft-apps", "xbox-apps", "ad-software", "internet", "downloads", "hemidock", "store", "pins", "shortcuts", "features", "windows-update", "cleanup",
     ];
     v.sort_by_key(|s| ORDER.iter().position(|o| *o == s.id).unwrap_or(usize::MAX));
     for s in v.iter_mut() {
@@ -521,6 +511,7 @@ fn on_fixed_disk(path: &std::path::Path) -> bool {
     let s = path.display().to_string();
     let Some(root) = s.get(..3).filter(|r| r.ends_with(":\\")) else { return false };
     let w = sys::wide(root);
+    // SAFETY: `w` ends with a NUL
     unsafe { GetDriveTypeW(w.as_ptr()) == 3 }
 }
 
@@ -601,6 +592,7 @@ pub fn remove_myself() {
 fn delete_at_restart(path: &std::path::Path) {
     use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
     let w = sys::wide(&path.display().to_string());
+    // SAFETY: `w` ends with a NUL; a null target means "delete at the restart"
     unsafe { MoveFileExW(w.as_ptr(), std::ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT) };
 }
 
@@ -611,9 +603,13 @@ pub fn pending_resume() -> Vec<String> {
     std::fs::read_to_string(resume_file()).map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()).unwrap_or_default()
 }
 
-pub fn clear_resume() {
+/// Err when the task is there and could not be deleted (it would start HeMiMizer as administrator at a sign-in).
+pub fn clear_resume() -> Result<(), String> {
     let _ = std::fs::remove_file(resume_file());
-    let _ = sys::exec("schtasks.exe", &["/delete", "/tn", TASK, "/f"]);
+    if !sys::exec("schtasks.exe", &["/query", "/tn", TASK]).is_ok_and(|o| o.code == 0) {
+        return Ok(());
+    }
+    sys::run("schtasks.exe", &["/delete", "/tn", TASK, "/f"]).map(|_| ())
 }
 
 /// Saves the steps that are left and schedules HeMiMizer to continue after the next sign-in. HeMiMizer and its
@@ -636,10 +632,8 @@ fn schedule_resume(ids: &[&str]) -> Result<(), String> {
         }
     }
     std::fs::write(resume_file(), ids.join("\r\n")).map_err(|e| e.to_string())?;
-    if !origin_file().exists() {
-        if let Some(d) = exe.parent() {
-            let _ = std::fs::write(origin_file(), d.display().to_string());
-        }
+    if !origin_file().exists() && let Some(d) = exe.parent() {
+        let _ = std::fs::write(origin_file(), d.display().to_string());
     }
     // an interactive task of this user needs no password; "highest" = as administrator without UAC
     sys::ps(&format!(
@@ -662,7 +656,9 @@ pub fn run(chosen: Vec<usize>, passwords: Vec<(String, String, String)>, tx: Sen
         let _ = std::fs::create_dir_all(data_dir());
         let ctx = Ctx { tx: tx.clone(), reboot: AtomicBool::new(false), passwords };
         ctx.write(&format!("==== Run: {} ====", chosen.iter().map(|&i| steps[i].id).collect::<Vec<_>>().join(", ")));
-        clear_resume();
+        if let Err(e) = clear_resume() {
+            ctx.note(format!("The scheduled task \"{TASK}\" could not be deleted – delete it in Task Scheduler: {e}"));
+        }
         windows::self_exclusion(true);
         let mut resume = false;
         let mut chosen = chosen;
@@ -682,6 +678,8 @@ pub fn run(chosen: Vec<usize>, passwords: Vec<(String, String, String)>, tx: Sen
                 k += 1;
                 continue;
             }
+            // catches a panic only in builds with unwinding (Debug, tests); the release has panic = "abort", so its
+            // steps must not panic at all (no unwrap on data from files or from the user)
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (s.run)(&ctx)))
                 .unwrap_or_else(|_| Err(tr("The step failed unexpectedly.", "Krok neočekávaně selhal.").into()));
             let secs = started.elapsed().as_secs();
@@ -731,7 +729,9 @@ pub fn run(chosen: Vec<usize>, passwords: Vec<(String, String, String)>, tx: Sen
         }
         if !resume {
             let _ = std::fs::remove_dir_all(sys::work_dir());
-            windows::self_exclusion(false);
+            if !windows::self_exclusion(false) {
+                ctx.note("The Microsoft Defender exclusions of HeMiMizer could not be removed – remove them in Windows Security (Virus & threat protection settings → Exclusions)");
+            }
             let _ = std::fs::remove_file(data_dir().join("wu-rounds.txt"));
             if let Some(f) = write_todo() {
                 ctx.write(&format!("to-do file: {}", f.display()));
@@ -745,7 +745,8 @@ pub fn run(chosen: Vec<usize>, passwords: Vec<(String, String, String)>, tx: Sen
 
 /// The newest download link of every program and driver: (name, link or error).
 pub fn check_links() -> Vec<(String, Result<String, String>)> {
-    let checks: [(&str, fn() -> Result<String, String>); 7] = [
+    type Link = fn() -> Result<String, String>;
+    let checks: [(&str, Link); 7] = [
         ("7-Zip", programs::url_7zip),
         ("VLC", programs::url_vlc),
         ("Brave", || programs::brave_version().map(|v| format!("Brave {v}")).ok_or_else(|| "GitHub".to_string())),

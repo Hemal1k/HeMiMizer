@@ -20,9 +20,6 @@ pub const OPTIONS: &[(&str, bool)] = &[
     ("cleanup", false),
 ];
 
-/// Steps of the author's own taste that the public HeMiMizer never runs.
-pub const NEVER: &[&str] = &["restore", "calculator"];
-
 pub fn is_option(id: &str) -> bool {
     OPTIONS.iter().any(|(o, _)| *o == id)
 }
@@ -39,9 +36,6 @@ pub fn defaults() -> Vec<String> {
 
 /// The step runs (by the plan of the wizard; no plan = the defaults).
 pub fn runs(id: &str) -> bool {
-    if NEVER.contains(&id) {
-        return false;
-    }
     if !is_option(id) {
         return true;
     }

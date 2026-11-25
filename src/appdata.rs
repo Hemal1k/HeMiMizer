@@ -204,7 +204,7 @@ pub fn restore(c: &Ctx) -> Res {
             }
             let r = if let Some(key) = reg_key(p) {
                 std::fs::read(from.join("settings.reg")).map_err(|e| e.to_string()).and_then(|raw| {
-                    let u: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+                    let u: Vec<u16> = raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
                     // only the key of this program (audit 2026-11-24: a .reg of the backup went in as it was)
                     sys::reg_import_under(String::from_utf16_lossy(&u).trim_start_matches('\u{feff}'), &[&format!(r"HKEY_CURRENT_USER\{key}")])
                 })

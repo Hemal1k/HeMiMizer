@@ -147,7 +147,7 @@ pub fn link(s: &Session, lang: &Language) -> Result<(String, String), String> {
 pub fn size(url: &str) -> u64 {
     curl(&["-sIL", "-A", UA, url])
         .ok()
-        .and_then(|h| h.lines().filter_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().to_string())).last())
+        .and_then(|h| h.lines().filter_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().to_string())).next_back())
         .and_then(|v| v.parse().ok())
         .unwrap_or(0)
 }
@@ -158,7 +158,7 @@ pub fn download(url: &str, dest: &Path, progress: &dyn Fn(u64, u64)) -> Result<(
     let part = dest.with_extension("iso.part");
     let p = part.display().to_string();
     let mut child = std::process::Command::new(crate::sys::program("curl.exe"))
-        .args(["-sSL", "--fail", "--retry", "3", "-C", "-", "-A", UA, "-o", &p, url])
+        .args(["-sSL", "--proto", "=https", "--proto-redir", "=https", "--fail", "--retry", "3", "-C", "-", "-A", UA, "-o", &p, url])
         .creation_flags(0x0800_0000)
         .spawn()
         .map_err(|e| format!("curl: {e}"))?;

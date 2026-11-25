@@ -28,6 +28,8 @@ struct Who {
 
 impl Who {
     fn new() -> Result<Who, String> {
+        // SAFETY: the strings end with a NUL; the out pointers are valid locals; `user` is as large as Windows asked
+        // for (and the size passed with it); the token is closed and `admins` is freed in Drop
         unsafe {
             let mut token: HANDLE = null_mut();
             if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES, &mut token) == 0 {
@@ -38,7 +40,10 @@ impl Who {
                 let mut luid: LUID = std::mem::zeroed();
                 if LookupPrivilegeValueW(null(), wide(name).as_ptr(), &mut luid) != 0 {
                     let tp = TOKEN_PRIVILEGES { PrivilegeCount: 1, Privileges: [LUID_AND_ATTRIBUTES { Luid: luid, Attributes: SE_PRIVILEGE_ENABLED }] };
-                    AdjustTokenPrivileges(token, 0, &tp, 0, null_mut(), null_mut());
+                    // without it, the owner of what another user owns cannot be changed: the error comes later, per file
+                    if AdjustTokenPrivileges(token, 0, &tp, 0, null_mut(), null_mut()) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(1300) {
+                        crate::sys::log(&format!("{name} not enabled: {}", std::io::Error::last_os_error()));
+                    }
                 }
             }
             let mut size = 0u32;
@@ -59,12 +64,16 @@ impl Who {
     }
 
     fn user_sid(&self) -> PSID {
-        unsafe { (*(self.user.as_ptr() as *const TOKEN_USER)).User.Sid }
+        // SAFETY: `user` holds the TOKEN_USER that GetTokenInformation wrote (checked in new()); read unaligned, as a
+        // Vec<u8> promises no alignment
+        unsafe { std::ptr::read_unaligned(self.user.as_ptr() as *const TOKEN_USER).User.Sid }
     }
 
     /// One file or folder: the user its owner, the Administrators full control added to its permissions.
     fn take_one(&self, path: &Path) -> Result<(), String> {
         let name = wide(&path.display().to_string());
+        // SAFETY: `name` ends with a NUL; the SIDs live as long as `self`; `dacl` points into `sd` and is used by
+        // SetEntriesInAclW before `sd` is freed; `new_dacl` is freed after its last use
         unsafe {
             let r = SetNamedSecurityInfoW(name.as_ptr(), SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, self.user_sid(), null_mut(), null(), null());
             if r != ERROR_SUCCESS {
@@ -110,11 +119,9 @@ impl Who {
             first_error.get_or_insert_with(|| format!("{}: {e}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())));
         }
         let is_dir = std::fs::symlink_metadata(path).map(|m| m.is_dir()).unwrap_or(false);
-        if is_dir {
-            if let Ok(entries) = std::fs::read_dir(path) {
-                for entry in entries.flatten() {
-                    self.take_tree(&entry.path(), first_error);
-                }
+        if is_dir && let Ok(entries) = std::fs::read_dir(path) {
+            for entry in entries.flatten() {
+                self.take_tree(&entry.path(), first_error);
             }
         }
     }
@@ -122,6 +129,7 @@ impl Who {
 
 impl Drop for Who {
     fn drop(&mut self) {
+        // SAFETY: `admins` was allocated by ConvertStringSidToSidW and is freed once, here
         unsafe { LocalFree(self.admins) };
     }
 }

@@ -110,7 +110,7 @@ fn dism(args: &[&str]) -> Result<String, String> {
     if o.code == 0 || o.code == 3010 {
         Ok(o.text)
     } else {
-        Err(format!("DISM {:#X}: {}", o.code as u32, o.text.trim().lines().filter(|l| !l.trim().is_empty()).last().unwrap_or("")))
+        Err(format!("DISM {:#X}: {}", o.code as u32, o.text.trim().lines().rfind(|l| !l.trim().is_empty()).unwrap_or("")))
     }
 }
 
@@ -287,12 +287,10 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
         log("Adding the drivers".into());
         dism(&[&format!("/Image:{}", mount.display()), "/Add-Driver", &format!("/Driver:{}", o.drivers.trim().trim_matches('"')), "/Recurse"])?;
     }
-    if o.add_hemimizer {
-        if let Ok(exe) = std::env::current_exe() {
-            let desk = mount.join(r"Users\Public\Desktop");
-            let _ = std::fs::create_dir_all(&desk);
-            let _ = std::fs::copy(exe, desk.join("HeMiMizer.exe"));
-        }
+    if o.add_hemimizer && let Ok(exe) = std::env::current_exe() {
+        let desk = mount.join(r"Users\Public\Desktop");
+        let _ = std::fs::create_dir_all(&desk);
+        let _ = std::fs::copy(exe, desk.join("HeMiMizer.exe"));
     }
     if o.deep_clean {
         log("Cleaning the image (this takes long)".into());

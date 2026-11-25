@@ -15,6 +15,7 @@ pub fn delete_values(root: Root, key: &str, names: &[&str]) {
     let k = wide(key);
     for n in names {
         let n = wide(n);
+        // SAFETY: both strings end with a NUL (`wide`)
         unsafe { RegDeleteKeyValueW(hkey(root), k.as_ptr(), n.as_ptr()) };
     }
 }
@@ -85,6 +86,7 @@ fn root_name(r: Root) -> &'static str {
 pub fn set_dword(root: Root, key: &str, name: &str, value: u32) -> Result<(), String> {
     log(&format!("reg {}\\{key} {name} = {value}", root_name(root)));
     let (k, n) = (wide(key), wide(name));
+    // SAFETY: the strings end with a NUL; the data is the 4 bytes of `value`
     let r = unsafe { RegSetKeyValueW(hkey(root), k.as_ptr(), n.as_ptr(), REG_DWORD, &value as *const u32 as _, 4) };
     if r == ERROR_SUCCESS {
         Ok(())
@@ -99,6 +101,7 @@ pub fn set_dword(root: Root, key: &str, name: &str, value: u32) -> Result<(), St
 pub fn set_sz(root: Root, key: &str, name: &str, value: &str) -> Result<(), String> {
     log(&format!("reg {}\\{key} {name} = \"{value}\"", root_name(root)));
     let (k, n, v) = (wide(key), wide(name), wide(value));
+    // SAFETY: the strings end with a NUL; the data is `v` with its NUL, its length in bytes
     let r = unsafe { RegSetKeyValueW(hkey(root), k.as_ptr(), n.as_ptr(), REG_SZ, v.as_ptr() as _, (v.len() * 2) as u32) };
     if r == ERROR_SUCCESS {
         Ok(())
@@ -112,6 +115,7 @@ pub fn set_sz(root: Root, key: &str, name: &str, value: &str) -> Result<(), Stri
 pub fn set_binary(root: Root, key: &str, name: &str, value: &[u8]) -> Result<(), String> {
     use windows_sys::Win32::System::Registry::REG_BINARY;
     let (k, n) = (wide(key), wide(name));
+    // SAFETY: the strings end with a NUL; the data is `value` with its length
     let r = unsafe { RegSetKeyValueW(hkey(root), k.as_ptr(), n.as_ptr(), REG_BINARY, value.as_ptr() as _, value.len() as u32) };
     if r == ERROR_SUCCESS { Ok(()) } else { Err(reg_err(r, key, name)) }
 }
@@ -121,6 +125,7 @@ pub fn value_names(root: Root, key: &str) -> Vec<String> {
     use windows_sys::Win32::System::Registry::{KEY_READ, RegCloseKey, RegEnumValueW, RegOpenKeyExW};
     let k = wide(key);
     let mut h: HKEY = null_mut();
+    // SAFETY: `k` ends with a NUL and `h` is a valid out pointer
     if unsafe { RegOpenKeyExW(hkey(root), k.as_ptr(), 0, KEY_READ, &mut h) } != ERROR_SUCCESS {
         return Vec::new();
     }
@@ -128,12 +133,14 @@ pub fn value_names(root: Root, key: &str) -> Vec<String> {
     for i in 0.. {
         let mut buf = [0u16; 512];
         let mut len = buf.len() as u32;
+        // SAFETY: `h` is open; `len` is the size of `buf` in characters, the call writes at most that many
         let r = unsafe { RegEnumValueW(h, i, buf.as_mut_ptr(), &mut len, null_mut(), null_mut(), null_mut(), null_mut()) };
         if r != ERROR_SUCCESS {
             break;
         }
         out.push(String::from_utf16_lossy(&buf[..len as usize]));
     }
+    // SAFETY: `h` is open and closed once
     unsafe { RegCloseKey(h) };
     out
 }
@@ -142,6 +149,7 @@ pub fn get_sz(root: Root, key: &str, name: &str) -> Option<String> {
     let (k, n) = (wide(key), wide(name));
     let mut buf = vec![0u16; 2048];
     let mut size = (buf.len() * 2) as u32;
+    // SAFETY: the strings end with a NUL; `size` is the size of `buf` in bytes, the call writes at most that many
     let r = unsafe { RegGetValueW(hkey(root), k.as_ptr(), n.as_ptr(), RRF_RT_REG_SZ, null_mut(), buf.as_mut_ptr() as _, &mut size) };
     if r != ERROR_SUCCESS {
         return None;
@@ -155,6 +163,7 @@ pub fn get_dword(root: Root, key: &str, name: &str) -> Option<u32> {
     let (k, n) = (wide(key), wide(name));
     let mut v: u32 = 0;
     let mut size = 4u32;
+    // SAFETY: the strings end with a NUL; only a DWORD (4 bytes, `size`) is written into `v`
     let r = unsafe { RegGetValueW(hkey(root), k.as_ptr(), n.as_ptr(), RRF_RT_REG_DWORD, null_mut(), &mut v as *mut u32 as _, &mut size) };
     (r == ERROR_SUCCESS).then_some(v)
 }
@@ -164,8 +173,10 @@ pub fn key_exists(root: Root, key: &str) -> bool {
     use windows_sys::Win32::System::Registry::{KEY_READ, RegCloseKey, RegOpenKeyExW};
     let k = wide(key);
     let mut h: HKEY = null_mut();
+    // SAFETY: `k` ends with a NUL and `h` is a valid out pointer
     let ok = unsafe { RegOpenKeyExW(hkey(root), k.as_ptr(), 0, KEY_READ, &mut h) } == ERROR_SUCCESS;
     if ok {
+        // SAFETY: `h` was opened above and is closed once
         unsafe { RegCloseKey(h) };
     }
     ok
@@ -173,6 +184,7 @@ pub fn key_exists(root: Root, key: &str) -> bool {
 
 pub fn delete_tree(root: Root, key: &str) {
     let k = wide(key);
+    // SAFETY: `k` ends with a NUL
     unsafe { RegDeleteTreeW(hkey(root), k.as_ptr()) };
 }
 
@@ -180,10 +192,10 @@ pub fn delete_tree(root: Root, key: &str) {
 pub fn dwords(root: Root, key: &str, values: &[(&str, u32)]) -> Result<(), String> {
     let mut first = Ok(());
     for (n, v) in values {
-        if let Err(e) = set_dword(root, key, n, *v) {
-            if first.is_ok() {
-                first = Err(e);
-            }
+        if let Err(e) = set_dword(root, key, n, *v)
+            && first.is_ok()
+        {
+            first = Err(e);
         }
     }
     first
@@ -234,8 +246,10 @@ fn decode(bytes: &[u8]) -> String {
     if let Ok(s) = std::str::from_utf8(bytes) {
         return s.to_string();
     }
+    // SAFETY: the input is `bytes` with its length; a null output only asks for the size
     let n = unsafe { MultiByteToWideChar(CP_OEMCP, 0, bytes.as_ptr(), bytes.len() as i32, null_mut(), 0) };
     let mut w = vec![0u16; n.max(0) as usize];
+    // SAFETY: `w` has the `n` characters the first call asked for
     unsafe { MultiByteToWideChar(CP_OEMCP, 0, bytes.as_ptr(), bytes.len() as i32, w.as_mut_ptr(), n) };
     String::from_utf16_lossy(&w)
 }
@@ -311,6 +325,7 @@ pub fn log_path() -> PathBuf {
 pub fn log(text: &str) {
     use std::io::Write;
     use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+    // SAFETY: SYSTEMTIME is plain data (zeroed is valid) and `st` is a valid out pointer
     let t = unsafe {
         let mut st = std::mem::zeroed();
         GetLocalTime(&mut st);
@@ -502,12 +517,16 @@ pub fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
     let mut p: windows_sys::core::PWSTR = null_mut();
+    // SAFETY: `id` is a valid GUID and `p` a valid out pointer
     let r = unsafe { SHGetKnownFolderPath(id, 0, null_mut(), &mut p) };
     if r != 0 || p.is_null() {
         return None;
     }
+    // SAFETY: on success `p` is a string that ends with a NUL; it is read only up to it and freed once, after
     let len = (0..).take_while(|&i| unsafe { *p.add(i) } != 0).count();
+    // SAFETY: as above, `len` characters before the NUL
     let s = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(p, len) });
+    // SAFETY: as above
     unsafe { CoTaskMemFree(p as _) };
     Some(PathBuf::from(s))
 }
@@ -689,12 +708,14 @@ pub fn shell_open(target: &str) {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let (op, t) = (wide("open"), wide(target));
+    // SAFETY: both strings end with a NUL; the other pointers may be null
     unsafe { ShellExecuteW(null_mut(), op.as_ptr(), t.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
 }
 
 /// Tells Explorer that file associations changed.
 pub fn assoc_changed() {
     use windows_sys::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify};
+    // SAFETY: SHCNE_ASSOCCHANGED takes no items, both pointers are null as documented
     unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED as i32, SHCNF_IDLIST, std::ptr::null(), std::ptr::null()) };
 }
 
@@ -703,6 +724,7 @@ pub fn settings_changed() {
     use windows_sys::Win32::UI::WindowsAndMessaging::{HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETTINGCHANGE};
     let s = wide("ImmersiveColorSet");
     let p = wide("Policy");
+    // SAFETY: the strings end with a NUL and live until the calls return (they time out after 2 s at most)
     unsafe {
         SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, s.as_ptr() as isize, SMTO_ABORTIFHUNG, 2000, null_mut());
         SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, p.as_ptr() as isize, SMTO_ABORTIFHUNG, 2000, null_mut());
@@ -718,6 +740,7 @@ pub fn elevated() -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    // SAFETY: the out pointers are valid locals; TOKEN_ELEVATION is passed with its size; the token is closed once
     unsafe {
         let mut token: HANDLE = std::ptr::null_mut();
         if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {

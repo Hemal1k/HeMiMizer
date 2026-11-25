@@ -56,7 +56,8 @@ HeMiMizer connects only to: **GitHub** (its own update check at every start – 
 and the HeMi apps and ArtCraft from their releases), the **winget** sources (the package manager of Windows; the programs
 come from their makers, and winget has its own telemetry), **Microsoft** (winget itself if it is missing, Visual C++,
 DirectX and .NET, Windows Update and Microsoft Store updates, `www.msftconnecttest.com` to see if the PC is online, the
-**Download Windows** tool with the session check of Microsoft's download page, and `oscdimg.exe` for **Make a smaller
+**Download Windows** tool with the session check of Microsoft's download page – Microsoft's own device check
+script, as with Fido and Rufus –, and `oscdimg.exe` for **Make a smaller
 Windows**), **amd.com** (the AMD drivers), your network drives (from the backup) and – only if you turn on Encrypted DNS –
 **Cloudflare** (1.1.1.1 over HTTPS for all DNS queries of the PC). No telemetry; nothing about you or this PC is sent.
 

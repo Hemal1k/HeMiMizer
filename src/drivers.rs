@@ -194,9 +194,7 @@ pub fn internet(c: &Ctx) -> Res {
 
 /// The step says it, the end of the run lists it, and HeMiMizer goes on (nothing is downloaded).
 fn not_next_to_exe(c: &Ctx, what: &str) -> Res {
-    let dir = crate::config::dir().parent().map(|d| d.display().to_string()).unwrap_or_default();
     // c.note writes it to the log too
-    let _ = dir;
     c.note(format!("{what}: {}", tr("no installer was chosen – install it by hand", "nebyl vybrán instalační program – nainstaluj ho ručně")));
     Ok(tr("Installer not found – skipped", "Instalační program nenalezen – přeskočeno").into())
 }
@@ -214,7 +212,7 @@ pub fn chipset(c: &Ctx) -> Res {
     if installed_version("AMD Chipset Software").as_deref() == Some(version.as_str()) {
         return Ok(format!("{version} – {}", tr("already installed", "už je nainstalovaný")));
     }
-    c.log(format!("{} {} ({version})", tr("Installing", "Instaluji"), l.path.file_name().unwrap().to_string_lossy()));
+    c.log(format!("{} {} ({version})", tr("Installing", "Instaluji"), l.path.file_name().unwrap_or(l.path.as_os_str()).to_string_lossy()));
     sys::run(&l.path.display().to_string(), &["/S"])?;
     c.reboot();
     Ok(version)
@@ -250,7 +248,7 @@ pub fn gpu(c: &Ctx) -> Res {
     }
     let dir = sys::work_dir().join("AMD-Adrenalin");
     let _ = std::fs::remove_dir_all(&dir);
-    c.log(format!("{} {}", tr("Unpacking", "Rozbaluji"), l.path.file_name().unwrap().to_string_lossy()));
+    c.log(format!("{} {}", tr("Unpacking", "Rozbaluji"), l.path.file_name().unwrap_or(l.path.as_os_str()).to_string_lossy()));
     unpack(&l.path, &dir)?;
     c.log(tr("Installing the driver – the screen may go black for a moment", "Instaluji ovladač – obrazovka může na chvíli zčernat"));
     let setup = dir.join("Setup.exe");

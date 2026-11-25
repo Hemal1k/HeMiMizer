@@ -67,12 +67,12 @@ fn fetch(c: &Ctx, p: &Planned) -> Result<bool, String> {
     }
     c.log(format!("{} {}", tr("Downloading", "Stahuji"), p.name));
     let (url, version) = (p.resolve)()?;
-    if !p.installed.is_empty() && !version.is_empty() {
-        if let Some(have) = programs::installed_version(p.installed) {
-            if have == version || have.ends_with(&format!(".{version}")) {
-                return Ok(false);
-            }
-        }
+    if !p.installed.is_empty()
+        && !version.is_empty()
+        && let Some(have) = programs::installed_version(p.installed)
+        && (have == version || have.ends_with(&format!(".{version}")))
+    {
+        return Ok(false);
     }
     let name = file_name(&url);
     let file = sys::work_dir().join(format!("{}-{}", p.id, if name.to_lowercase().ends_with(".exe") { name } else { format!("{name}.exe") }));

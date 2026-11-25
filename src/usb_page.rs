@@ -8,6 +8,8 @@ use eframe::egui::{self, RichText, vec2};
 use std::sync::{Arc, Mutex};
 
 pub type Shared<T> = Arc<Mutex<Option<T>>>;
+/// (countries / regions, time zones, the region of this PC)
+pub type RegionLists = (Vec<(String, String)>, Vec<(String, String)>, Region);
 
 /// What the page keeps: the choices, and the work while it runs.
 #[derive(Default)]
@@ -28,7 +30,7 @@ pub struct UsbUi {
     pub culture: String,
     pub time_zone: String,
     /// the countries / regions and time zones of Windows, read in the background
-    pub lists: Shared<(Vec<(String, String)>, Vec<(String, String)>, Region)>,
+    pub lists: Shared<RegionLists>,
     pub no_privacy: bool,
     pub no_bitlocker: bool,
     /// the question "everything on … is erased" is open
@@ -125,11 +127,11 @@ impl HeMiMizerApp {
         self.usb.label_from_iso();
         let lists = self.usb.lists.lock().unwrap().clone();
         let u = &mut self.usb;
-        if u.culture == "…" {
-            if let Some((_, _, here)) = &lists {
-                u.culture = here.culture.clone();
-                u.time_zone = here.time_zone.clone();
-            }
+        if u.culture == "…"
+            && let Some((_, _, here)) = &lists
+        {
+            u.culture = here.culture.clone();
+            u.time_zone = here.time_zone.clone();
         }
         section(ui, &p, "USB disk");
         card(ui, &p, |ui| {

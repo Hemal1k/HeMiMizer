@@ -205,6 +205,7 @@ fn reg_dword(key: &str, value: &str) -> Option<u32> {
     let (k, v) = (crate::sys::wide(key), crate::sys::wide(value));
     let mut data = 0u32;
     let mut size = 4u32;
+    // SAFETY: the strings end with a NUL; only a DWORD (4 bytes, `size`) is written into `data`
     let r = unsafe {
         RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_DWORD, null_mut(), &mut data as *mut u32 as _, &mut size)
     };
@@ -215,6 +216,7 @@ fn reg_binary(key: &str, value: &str) -> Option<Vec<u8>> {
     let (k, v) = (crate::sys::wide(key), crate::sys::wide(value));
     let mut data = vec![0u8; 64];
     let mut size = data.len() as u32;
+    // SAFETY: the strings end with a NUL; `size` is the length of `data`, the call writes at most that many bytes
     let r = unsafe {
         RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_BINARY, null_mut(), data.as_mut_ptr() as _, &mut size)
     };
@@ -388,6 +390,8 @@ pub fn style_window(hwnd: isize, p: &Palette) -> bool {
     }
     let hwnd = hwnd as HWND;
     let dark: i32 = (!p.light) as i32;
+    // SAFETY: `hwnd` is the window of this app (not null, checked above); every attribute gets a pointer to a
+    // local of the 4 bytes it expects
     unsafe {
         DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE as _, &dark as *const i32 as _, 4);
         let backdrop: i32 = DWMSBT_MAINWINDOW;

@@ -19,6 +19,8 @@ pub fn watch() {
     if STARTED.swap(true, Ordering::SeqCst) || !crate::sys::elevated() || !snipping_on() {
         return;
     }
+    // SAFETY: `on_key` has the signature of a LowLevelKeyboardProc; MSG is plain data (zeroed is valid) and the
+    // message loop runs on the thread that set the hook, as Windows requires
     std::thread::spawn(|| unsafe {
         let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(on_key), std::ptr::null_mut(), 0);
         if hook.is_null() {
@@ -39,6 +41,8 @@ fn snipping_on() -> bool {
 }
 
 unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // SAFETY: for code >= 0 and a key message, Windows passes a valid KBDLLHOOKSTRUCT in `lparam`; the arguments
+    // go on to CallNextHookEx unchanged. Only the key code is read, nothing is kept or written down.
     unsafe {
         if code >= 0 && (wparam as u32 == WM_KEYUP || wparam as u32 == WM_SYSKEYUP) {
             let k = &*(lparam as *const KBDLLHOOKSTRUCT);
@@ -53,6 +57,7 @@ unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> L
 
 fn ours_in_front() -> bool {
     let mut pid = 0u32;
+    // SAFETY: `pid` is a valid out pointer; a null window (none in front) only gives 0
     unsafe { GetWindowThreadProcessId(GetForegroundWindow(), &mut pid) };
     pid == std::process::id()
 }

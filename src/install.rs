@@ -96,11 +96,12 @@ fn winget_install(c: &Ctx, item: &Item, id: &str, store: bool) -> Result<(), Str
 }
 
 fn last_line(text: &str) -> String {
-    text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.chars().all(|c| "-\\|/█▒ ".contains(c))).last().unwrap_or("").to_string()
+    text.lines().map(str::trim).rfind(|l| !l.is_empty() && !l.chars().all(|c| "-\\|/█▒ ".contains(c))).unwrap_or("").to_string()
 }
 
 /// Runs a program as the signed-in user without administrator rights (a scheduled task with the limited token)
-/// and waits for it; its output is not known, only that it ended.
+/// and waits for it; its output is not known, only how it ended (the last result of the task; 0 when that cannot be
+/// read).
 fn as_user(exe: &str, args: &[&str]) -> Result<sys::Output, String> {
     const TASK: &str = "HeMiMizer-as-user";
     let line = std::iter::once(format!("\"{exe}\"")).chain(args.iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.to_string() })).collect::<Vec<_>>().join(" ");
@@ -116,8 +117,13 @@ fn as_user(exe: &str, args: &[&str]) -> Result<sys::Output, String> {
         }
         std::thread::sleep(std::time::Duration::from_secs(3));
     }
+    // the exit code of the program (an unsigned number, e.g. 2316632107 = 0x8A15002B of winget)
+    let code = sys::ps(&format!("(Get-ScheduledTaskInfo -TaskName '{TASK}').LastTaskResult"))
+        .ok()
+        .and_then(|t| t.trim().lines().last().and_then(|l| l.trim().parse::<i64>().ok()))
+        .map_or(0, |c| c as u32 as i32);
     let _ = sys::exec("schtasks.exe", &["/delete", "/tn", TASK, "/f"]);
-    Ok(sys::Output { code: 0, text: String::new() })
+    Ok(sys::Output { code, text: String::new() })
 }
 
 // ---------------------------------------------------------------- the installers of the backup
@@ -231,7 +237,11 @@ fn install_offline(c: &Ctx, item: &Item) -> Result<bool, String> {
                 a.push("/ALLUSERS".into());
             }
             let a: Vec<&str> = a.iter().map(String::as_str).collect();
-            if AS_USER.contains(&item.id) { as_user(&file, &a).map(|_| ()) } else { sys::run(&file, &a).map(|_| ()) }
+            if AS_USER.contains(&item.id) {
+                as_user(&file, &a).and_then(|o| {
+                    if o.code == 0 || o.code == 3010 { Ok(()) } else { Err(format!("{} {} {:#X}", item.name, tr("ended with code", "skončil s kódem"), o.code as u32)) }
+                })
+            } else { sys::run(&file, &a).map(|_| ()) }
         }
     };
     r.map(|()| true)
