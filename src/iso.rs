@@ -1,50 +1,106 @@
-//! "Make a smaller Windows" – a lighter Windows 11 ISO in the spirit of Tiny11, by HeMiMizer's own list (no
-//! third-party script): one edition is taken from the ISO, the apps and parts chosen are removed, the registry of the
-//! image gets the chosen settings, the image is cleaned and compressed, and a new bootable ISO (BIOS + UEFI) is made
-//! with oscdimg of Microsoft (downloaded from Microsoft's symbol server, its signature checked).
+//! "Make a custom Windows ISO" – a Windows 11 ISO by HeMiMizer's own list (no third-party script): the editions chosen
+//! are taken from the ISO, apps are removed (Easy: all but a few; Custom: the ones ticked), the registry of each image
+//! gets the chosen settings, drivers and apps for the first sign-in may be added, the images are cleaned and
+//! compressed, and a new bootable ISO (BIOS + UEFI) is made with oscdimg of Microsoft (downloaded from Microsoft's
+//! symbol server, its checksum checked).
 //!
 //! The work runs in C:\HeMiMizer-ISO (DISM needs a local NTFS folder) and is removed at the end, also after an error
 //! (the image is unmounted without saving, the hives unloaded, the ISO closed).
 
 use crate::sys;
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 
-/// What can be removed from or set in the image. `simple`: in the simple (recommended) choice.
+/// A setting of the image. `easy`: part of the Easy choice (and ticked at first in Custom).
 pub struct Item {
     pub id: &'static str,
     pub title: &'static str,
     pub detail: &'static str,
-    pub simple: bool,
+    pub easy: bool,
     pub what: What,
 }
 
 pub enum What {
-    /// provisioned Store apps: the beginnings of their names
-    Apps(&'static [&'static str]),
-    /// files or folders of the image (relative to its root), removed
-    Paths(&'static [&'static str]),
     /// registry values: (hive, key, name, value) – hive SOFTWARE, SYSTEM or DEFAULT (the profile of new users)
     Reg(&'static [(&'static str, &'static str, &'static str, u32)]),
-    /// done in its own way (see build)
+    /// done in its own way (see customize)
     Own,
 }
 
-const fn it(id: &'static str, title: &'static str, detail: &'static str, simple: bool, what: What) -> Item {
-    Item { id, title, detail, simple, what }
+const fn it(id: &'static str, title: &'static str, detail: &'static str, easy: bool, what: What) -> Item {
+    Item { id, title, detail, easy, what }
 }
 
-pub const REMOVE: &[Item] = &[
-    it("news", "News, Weather, Tips and Get Help", "Bing News, Bing Weather, Tips, Get Help", true, What::Apps(&["Microsoft.BingNews", "Microsoft.BingWeather", "Microsoft.GetHelp", "Microsoft.Getstarted"])),
-    it("office", "Microsoft 365, Outlook (new), To Do, Power Automate", "Ads for paid Microsoft apps", true, What::Apps(&["Microsoft.MicrosoftOfficeHub", "Microsoft.OutlookForWindows", "Microsoft.Todos", "Microsoft.PowerAutomateDesktop"])),
-    it("teams", "Teams, Family, Quick Assist, Phone Link", "Microsoft chat and remote help", true, What::Apps(&["MSTeams", "MicrosoftTeams", "MicrosoftCorporationII.MicrosoftFamily", "MicrosoftCorporationII.QuickAssist", "Microsoft.YourPhone"])),
-    it("clipchamp", "Clipchamp", "Microsoft's video editor", true, What::Apps(&["Clipchamp.Clipchamp"])),
-    it("extras", "Solitaire, Maps, Alarms, Sound Recorder, Feedback Hub", "Small apps few people use", true, What::Apps(&["Microsoft.MicrosoftSolitaireCollection", "Microsoft.WindowsMaps", "Microsoft.WindowsAlarms", "Microsoft.WindowsSoundRecorder", "Microsoft.WindowsFeedbackHub", "Microsoft.People", "microsoft.windowscommunicationsapps"])),
-    it("ai", "Copilot, Dev Home, Cortana, Bing Search", "AI and search apps", true, What::Apps(&["Microsoft.Copilot", "Microsoft.Windows.DevHome", "Microsoft.549981C3F5F10", "Microsoft.BingSearch"])),
-    it("xbox", "Xbox apps and Game Bar", "Keep them for Game Pass and the Xbox app", true, What::Apps(&["Microsoft.GamingApp", "Microsoft.Xbox.TCUI", "Microsoft.XboxGamingOverlay", "Microsoft.XboxGameOverlay", "Microsoft.XboxSpeechToTextOverlay", "Microsoft.XboxIdentityProvider"])),
-    it("media", "Media Player and Movies & TV", "VLC or another player instead", false, What::Apps(&["Microsoft.ZuneMusic", "Microsoft.ZuneVideo"])),
-    it("onedrive", "OneDrive", "Not installed for new users", true, What::Own),
-    it("edge", "Microsoft Edge", "The browser (WebView2, which apps need, stays) – install another one first", false, What::Paths(&[r"Program Files (x86)\Microsoft\Edge", r"Program Files (x86)\Microsoft\EdgeUpdate", r"Program Files (x86)\Microsoft\EdgeCore"])),
+/// An app Custom may remove: the beginnings of its package names. `default`: ticked at first.
+pub struct App {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub pkgs: &'static [&'static str],
+    pub default: bool,
+}
+
+const fn app(id: &'static str, name: &'static str, pkgs: &'static [&'static str], default: bool) -> App {
+    App { id, name, pkgs, default }
+}
+
+/// The apps of Windows 11 Custom offers one by one (Microsoft Store, Windows Security, App Installer and the libraries
+/// other apps need are never offered).
+pub const APPS: &[App] = &[
+    app("news", "News", &["Microsoft.BingNews"], true),
+    app("weather", "Weather", &["Microsoft.BingWeather"], true),
+    app("tips", "Tips and Get Help", &["Microsoft.Getstarted", "Microsoft.GetHelp"], true),
+    app("office", "Microsoft 365 (Office)", &["Microsoft.MicrosoftOfficeHub"], true),
+    app("outlook", "Outlook (new)", &["Microsoft.OutlookForWindows"], true),
+    app("mail", "Mail, Calendar and People", &["microsoft.windowscommunicationsapps", "Microsoft.People"], true),
+    app("todo", "To Do", &["Microsoft.Todos"], true),
+    app("automate", "Power Automate", &["Microsoft.PowerAutomateDesktop"], true),
+    app("teams", "Teams", &["MSTeams", "MicrosoftTeams"], true),
+    app("family", "Family", &["MicrosoftCorporationII.MicrosoftFamily"], true),
+    app("quickassist", "Quick Assist", &["MicrosoftCorporationII.QuickAssist"], true),
+    app("phone", "Phone Link", &["Microsoft.YourPhone", "MicrosoftWindows.CrossDevice"], true),
+    app("clipchamp", "Clipchamp", &["Clipchamp.Clipchamp"], true),
+    app("solitaire", "Solitaire", &["Microsoft.MicrosoftSolitaireCollection"], true),
+    app("maps", "Maps", &["Microsoft.WindowsMaps"], true),
+    app("alarms", "Clock", &["Microsoft.WindowsAlarms"], true),
+    app("recorder", "Sound Recorder", &["Microsoft.WindowsSoundRecorder"], true),
+    app("feedback", "Feedback Hub", &["Microsoft.WindowsFeedbackHub"], true),
+    app("copilot", "Copilot", &["Microsoft.Copilot", "Microsoft.Windows.Ai.Copilot.Provider"], true),
+    app("devhome", "Dev Home", &["Microsoft.Windows.DevHome"], true),
+    app("cortana", "Cortana and Bing Search", &["Microsoft.549981C3F5F10", "Microsoft.BingSearch"], true),
+    app("xbox", "Xbox apps and Game Bar", &["Microsoft.GamingApp", "Microsoft.Xbox.TCUI", "Microsoft.XboxGamingOverlay", "Microsoft.XboxGameOverlay", "Microsoft.XboxSpeechToTextOverlay", "Microsoft.XboxIdentityProvider", "Microsoft.Edge.GameAssist"], true),
+    app("movies", "Movies & TV", &["Microsoft.ZuneVideo"], false),
+    app("mediaplayer", "Media Player", &["Microsoft.ZuneMusic"], false),
+    app("stickynotes", "Sticky Notes", &["Microsoft.MicrosoftStickyNotes"], false),
+    app("paint", "Paint", &["Microsoft.Paint"], false),
+    app("calculator", "Calculator", &["Microsoft.WindowsCalculator"], false),
+    app("camera", "Camera", &["Microsoft.WindowsCamera"], false),
+    app("photos", "Photos", &["Microsoft.Windows.Photos"], false),
+    app("snipping", "Snipping Tool", &["Microsoft.ScreenSketch"], false),
+    app("notepad", "Notepad", &["Microsoft.WindowsNotepad"], false),
+    app("terminal", "Terminal", &["Microsoft.WindowsTerminal"], false),
 ];
+
+/// Easy: the apps that stay (Microsoft Store, App Installer, Windows Security, Terminal, Notepad, Photos, Media Player,
+/// Snipping Tool); every other app goes, except [`FRAMEWORKS`] (and Edge, which has its own choice).
+pub const EASY_KEEP: &[&str] = &[
+    "Microsoft.WindowsStore",
+    "Microsoft.StorePurchaseApp",
+    "Microsoft.DesktopAppInstaller",
+    "Microsoft.SecHealthUI",
+    "Microsoft.WindowsTerminal",
+    "Microsoft.WindowsNotepad",
+    "Microsoft.Windows.Photos",
+    "Microsoft.ZuneMusic",
+    "Microsoft.ScreenSketch",
+];
+
+/// Parts of the names of packages that other apps need (libraries, runtimes, codecs, language packs): never removed.
+const FRAMEWORKS: &[&str] = &["vclibs", "ui.xaml", "net.native", "runtime", "services.store", "extension", "winget", "languageexperiencepack", "applicationcompatibility"];
+
+/// The Edge package (its files are removed with the "edge" setting).
+const EDGE_PKG: &str = "microsoft.microsoftedge";
+const EDGE_PATHS: &[&str] = &[r"Program Files (x86)\Microsoft\Edge", r"Program Files (x86)\Microsoft\EdgeUpdate", r"Program Files (x86)\Microsoft\EdgeCore"];
+const WIDGETS_PKG: &str = "microsoftwindows.client.webexperience";
 
 pub const SETTINGS: &[Item] = &[
     it("hw", "No TPM 2.0, Secure Boot and RAM check", "Installs on older PCs too", true, What::Own),
@@ -58,30 +114,85 @@ pub const SETTINGS: &[Item] = &[
         ("DEFAULT", r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager", "SubscribedContent-338388Enabled", 0),
         ("DEFAULT", r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager", "SubscribedContent-338389Enabled", 0),
     ])),
+    it("websearch", "No web results in the search", "Start searches only the PC, not Bing", true, What::Reg(&[("DEFAULT", r"Software\Policies\Microsoft\Windows\Explorer", "DisableSearchBoxSuggestions", 1)])),
     it("telemetry", "Least diagnostic data", "Only the required data goes to Microsoft", true, What::Reg(&[
         ("SOFTWARE", r"Policies\Microsoft\Windows\DataCollection", "AllowTelemetry", 0),
         ("DEFAULT", r"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo", "Enabled", 0),
     ])),
-    it("copilot", "Copilot off", "No Copilot button and app", true, What::Reg(&[("SOFTWARE", r"Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot", 1)])),
+    it("ai", "AI off", "Copilot, Recall, Click to Do, the AI in Paint and Notepad, AI models for apps (Photos)", true, What::Reg(&[
+        ("SOFTWARE", r"Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot", 1),
+        ("DEFAULT", r"Software\Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot", 1),
+        ("DEFAULT", r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "ShowCopilotButton", 0),
+        ("SOFTWARE", r"Policies\Microsoft\Windows\WindowsAI", "DisableAIDataAnalysis", 1),
+        ("SOFTWARE", r"Policies\Microsoft\Windows\WindowsAI", "AllowRecallEnablement", 0),
+        ("SOFTWARE", r"Policies\Microsoft\Windows\WindowsAI", "DisableClickToDo", 1),
+        ("DEFAULT", r"Software\Policies\Microsoft\Windows\WindowsAI", "DisableAIDataAnalysis", 1),
+        ("DEFAULT", r"Software\Policies\Microsoft\Windows\WindowsAI", "DisableClickToDo", 1),
+        ("SOFTWARE", r"Microsoft\Windows\CurrentVersion\Policies\Paint", "DisableCocreator", 1),
+        ("SOFTWARE", r"Microsoft\Windows\CurrentVersion\Policies\Paint", "DisableGenerativeFill", 1),
+        ("SOFTWARE", r"Microsoft\Windows\CurrentVersion\Policies\Paint", "DisableImageCreator", 1),
+        ("SOFTWARE", r"Microsoft\Windows\CurrentVersion\Policies\Paint", "DisableGenerativeErase", 1),
+        ("SOFTWARE", r"Microsoft\Windows\CurrentVersion\Policies\Paint", "DisableRemoveBackground", 1),
+        ("SOFTWARE", r"Policies\WindowsNotepad", "DisableAIFeatures", 1),
+        // 2 = apps are denied the AI models of Windows (the generative features of Photos and others)
+        ("SOFTWARE", r"Policies\Microsoft\Windows\AppPrivacy", "LetAppsAccessSystemAIModels", 2),
+        ("SOFTWARE", r"Policies\Microsoft\Edge", "HubsSidebarEnabled", 0),
+    ])),
+    it("widgets", "No widgets", "No news board on the taskbar (Widgets removed)", true, What::Reg(&[("SOFTWARE", r"Policies\Microsoft\Dsh", "AllowNewsAndInterests", 0)])),
+    it("onedrive", "No OneDrive", "Not installed for new users", true, What::Own),
+    it("edge", "Remove Microsoft Edge", "WebView2, which apps need, stays – have another browser ready", false, What::Own),
     it("autoinstall", "No Outlook, Teams and Dev Home installed later", "Windows Update does not add them by itself", true, What::Own),
     it("bitlocker", "No automatic BitLocker encryption", "The disk is encrypted only if you turn it on", true, What::Reg(&[("SYSTEM", r"ControlSet001\Control\BitLocker", "PreventDeviceEncryption", 1)])),
     it("reserved", "No reserved storage", "About 7 GB more space for you", true, What::Reg(&[("SOFTWARE", r"Microsoft\Windows\CurrentVersion\ReserveManager", "ShippedWithReserves", 0)])),
 ];
 
+/// How install.wim / install.esd is compressed (DISM /Export-Image /Compress).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Compress {
+    /// install.wim, quick to make, bigger
+    Fast,
+    /// install.wim, smaller
+    Max,
+    /// install.esd, the smallest, slow to make
+    #[default]
+    Recovery,
+}
+
+impl Compress {
+    fn arg(self) -> &'static str {
+        match self {
+            Compress::Fast => "/Compress:fast",
+            Compress::Max => "/Compress:max",
+            Compress::Recovery => "/Compress:recovery",
+        }
+    }
+
+    fn file(self) -> &'static str {
+        if self == Compress::Recovery { "install.esd" } else { "install.wim" }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Options {
     pub iso: PathBuf,
-    /// the index of the edition in install.wim / install.esd
-    pub index: u32,
+    /// the editions: (index in install.wim / install.esd, name)
+    pub editions: Vec<(u32, String)>,
     pub out: PathBuf,
-    /// ids of REMOVE and SETTINGS that are on
+    /// Easy: only [`EASY_KEEP`] stays; else the [`APPS`] in `apps` go
+    pub easy: bool,
+    /// ids of APPS removed (Custom)
+    pub apps: Vec<String>,
+    /// ids of SETTINGS that are on
     pub chosen: Vec<String>,
     /// drivers to add (a folder with .inf files), empty = none
     pub drivers: String,
+    /// winget ids installed at the first sign-in
+    pub winget: Vec<String>,
+    /// a folder whose installers (.exe, .msi) run one after another at the first sign-in, empty = none
+    pub installers: String,
     /// HeMiMizer.exe on the desktop of the new Windows
     pub add_hemimizer: bool,
-    /// the image compressed harder (install.esd – smaller, slower to make)
-    pub esd: bool,
+    pub compress: Compress,
     /// the component store cleaned (/ResetBase – smaller, takes long)
     pub deep_clean: bool,
 }
@@ -90,11 +201,71 @@ impl Options {
     fn on(&self, id: &str) -> bool {
         self.chosen.iter().any(|c| c == id)
     }
+
+    /// Whether a provisioned app package goes.
+    fn goes(&self, package: &str) -> bool {
+        let n = package.to_lowercase();
+        let starts = |p: &&str| n.starts_with(&p.to_lowercase());
+        if FRAMEWORKS.iter().any(|f| n.contains(f)) {
+            return false;
+        }
+        if n.starts_with(EDGE_PKG) {
+            return self.on("edge");
+        }
+        if n.starts_with(WIDGETS_PKG) && self.on("widgets") {
+            return true;
+        }
+        if self.easy {
+            !EASY_KEEP.iter().any(starts)
+        } else {
+            APPS.iter().filter(|a| self.apps.iter().any(|x| x == a.id)).any(|a| a.pkgs.iter().any(starts))
+        }
+    }
+
+    /// The installers of the folder chosen (.exe and .msi), sorted by name.
+    fn installer_files(&self) -> Vec<PathBuf> {
+        let dir = self.installers.trim().trim_matches('"');
+        if dir.is_empty() {
+            return Vec::new();
+        }
+        let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("exe") || x.eq_ignore_ascii_case("msi")))
+            .collect();
+        v.sort();
+        v
+    }
 }
 
-/// The simple choice: everything marked `simple`.
-pub fn simple() -> Vec<String> {
-    REMOVE.iter().chain(SETTINGS).filter(|i| i.simple).map(|i| i.id.to_string()).collect()
+/// The settings of the Easy choice (Edge stays; the page adds "edge" when it should go).
+pub fn easy() -> Vec<String> {
+    SETTINGS.iter().filter(|i| i.easy).map(|i| i.id.to_string()).collect()
+}
+
+/// The apps Custom removes at first.
+pub fn default_apps() -> Vec<String> {
+    APPS.iter().filter(|a| a.default).map(|a| a.id.to_string()).collect()
+}
+
+/// A winget package id as winget prints it ("Mozilla.Firefox", "7zip.7zip"): letters, digits and . - _ + only.
+pub fn valid_winget(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || ".-_+".contains(c))
+}
+
+/// The winget ids of a text (separated by spaces, commas, semicolons or new lines).
+pub fn winget_ids(text: &str) -> Vec<String> {
+    text.split(|c: char| c.is_whitespace() || c == ',' || c == ';').filter(|s| !s.is_empty()).map(str::to_string).collect()
+}
+
+/// The last percentage in a text ("[====  42.0%  ]" of DISM, "45% complete" of oscdimg, "… (33%)"), 0–100.
+pub fn percent(s: &[u8]) -> Option<f32> {
+    let end = s.iter().rposition(|&b| b == b'%')?;
+    let start = s[..end].iter().rposition(|b| !(b.is_ascii_digit() || *b == b'.' || *b == b',')).map_or(0, |i| i + 1);
+    let t = std::str::from_utf8(&s[start..end]).ok()?.replace(',', ".");
+    t.parse::<f32>().ok().filter(|p| (0.0..=100.0).contains(p))
 }
 
 fn work() -> PathBuf {
@@ -105,13 +276,71 @@ fn q(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
+/// DISM (in English, so that its output can be read), waited for.
 fn dism(args: &[&str]) -> Result<String, String> {
-    let o = sys::exec("dism.exe", args)?;
-    if o.code == 0 || o.code == 3010 {
-        Ok(o.text)
-    } else {
-        Err(format!("DISM {:#X}: {}", o.code as u32, o.text.trim().lines().rfind(|l| !l.trim().is_empty()).unwrap_or("")))
+    let all: Vec<&str> = std::iter::once("/English").chain(args.iter().copied()).collect();
+    let o = sys::exec("dism.exe", &all)?;
+    if o.code == 0 || o.code == 3010 { Ok(o.text) } else { Err(dism_error(o.code, &o.text)) }
+}
+
+/// DISM with its progress: `what – NN%` goes to `log` while it works.
+fn dism_p(args: &[&str], what: &str, log: &dyn Fn(String)) -> Result<String, String> {
+    let all: Vec<&str> = std::iter::once("/English").chain(args.iter().copied()).collect();
+    let o = run_progress("dism.exe", &all, what, log)?;
+    if o.code == 0 || o.code == 3010 { Ok(o.text) } else { Err(dism_error(o.code, &o.text)) }
+}
+
+/// The message of a failed DISM: the line after "Error: …" (else the last line), without the progress bars.
+fn dism_error(code: i32, text: &str) -> String {
+    let lines: Vec<&str> = text.split(['\r', '\n']).map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('[')).collect();
+    let msg = lines.iter().position(|l| l.starts_with("Error")).and_then(|i| lines.get(i + 1).or(lines.get(i))).or(lines.last()).copied().unwrap_or("");
+    format!("DISM {:#X}: {msg}", code as u32)
+}
+
+/// Runs a program without a window and reads its output while it runs (stdout and stderr in one pipe): each new
+/// percentage it prints goes to `log` as "`what` – NN%" (DISM, oscdimg). The command, its exit code and its output
+/// (without the progress bars) go to the log of HeMiMizer, as `sys::exec` does.
+pub fn run_progress(exe: &str, args: &[&str], what: &str, log: &dyn Fn(String)) -> Result<sys::Output, String> {
+    use std::io::Read;
+    let started = std::time::Instant::now();
+    sys::log(&format!("> {exe} {}", args.iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.to_string() }).collect::<Vec<_>>().join(" ")));
+    log(what.to_string());
+    let (mut reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
+    let writer2 = writer.try_clone().map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(sys::program(exe));
+    cmd.args(args).stdin(std::process::Stdio::null()).stdout(writer).stderr(writer2).creation_flags(0x0800_0000);
+    let child = cmd.spawn();
+    // the write ends of this process closed, so that the reading ends when the program does
+    drop(cmd);
+    let mut child = child.map_err(|e| format!("{exe}: {e}"))?;
+    let mut all = Vec::new();
+    let mut buf = [0u8; 4096];
+    let mut last = -1i32;
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        all.extend_from_slice(&buf[..n]);
+        let tail = &all[all.len().saturating_sub(96)..];
+        if let Some(p) = percent(tail) {
+            let p = p as i32;
+            if p != last {
+                last = p;
+                log(format!("{what} – {p}%"));
+            }
+        }
     }
+    let code = child.wait().map_err(|e| e.to_string())?.code().unwrap_or(-1);
+    let text = String::from_utf8_lossy(&all).into_owned();
+    let shown: String = text.split(['\r', '\n']).map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('[')).collect::<Vec<_>>().join("\n").chars().take(3000).collect();
+    sys::log(&format!("< code {code} after {:.1} s\n{shown}", started.elapsed().as_secs_f32()));
+    Ok(sys::Output { code, text })
+}
+
+/// " (2 of 3)" when there is more than one edition.
+fn of(k: usize, n: usize) -> String {
+    if n > 1 { format!(" ({} of {n})", k + 1) } else { String::new() }
 }
 
 /// Opened without a drive letter, into a hidden folder (the same as the USB stick: no new drive pops up).
@@ -133,7 +362,7 @@ pub fn editions(iso: &Path) -> Result<Vec<(u32, String)>, String> {
     let root = mount_iso(iso)?;
     let r = (|| {
         let img = image_in(&root).ok_or("This ISO has no install.wim or install.esd – is it Windows?")?;
-        let t = dism(&["/English", "/Get-WimInfo", &format!("/WimFile:{}", img.display())])?;
+        let t = dism(&["/Get-WimInfo", &format!("/WimFile:{}", img.display())])?;
         let mut v = Vec::new();
         let mut idx = None;
         for l in t.lines() {
@@ -182,73 +411,166 @@ fn cleanup(w: &Path) {
     let _ = std::fs::remove_dir_all(w);
 }
 
+fn hive(name: &str, file: &Path) -> Result<bool, String> {
+    sys::exec("reg.exe", &["load", &format!(r"HKLM\z{name}"), &file.display().to_string()]).map(|o| o.code == 0)
+}
+
+fn set(hive: &str, key: &str, name: &str, v: u32) -> Result<(), String> {
+    sys::exec("reg.exe", &["add", &format!(r"HKLM\z{hive}\{key}"), "/v", name, "/t", "REG_DWORD", "/d", &v.to_string(), "/f"]).map(|_| ())
+}
+
 fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
+    if o.editions.is_empty() {
+        return Err("No edition chosen".into());
+    }
     let iso_dir = w.join("iso");
     let mount = w.join("mount");
     log("Copying the ISO".into());
     let src = mount_iso(&o.iso)?;
     let img = image_in(&src).ok_or("This ISO has no install.wim or install.esd – is it Windows?")?;
-    let rc = sys::exec(
-        "robocopy.exe",
-        &[&src.display().to_string(), &iso_dir.display().to_string(), "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/A-:R", "/XF", "install.wim", "install.esd"],
-    )?;
-    if rc.code >= 8 {
-        return Err(format!("Copying the ISO failed (robocopy {})", rc.code));
-    }
-    log("Taking the edition out of the image".into());
+    // made before the copy: its progress is measured on the disk of the folder
+    std::fs::create_dir_all(&iso_dir).map_err(|e| format!("{}: {e}", iso_dir.display()))?;
+    let total = crate::usb::folder_size(&src).saturating_sub(std::fs::metadata(&img).map(|m| m.len()).unwrap_or(0));
+    crate::usb::copy(&src, &iso_dir, &[], &[PathBuf::from("install.wim"), PathBuf::from("install.esd")], total, "Copying the ISO", log)?;
+
+    // the editions chosen into one image (index 1, 2 …, files shared between them are stored once)
     let wim = w.join("install.wim");
-    dism(&[
-        "/Export-Image",
-        &format!("/SourceImageFile:{}", img.display()),
-        &format!("/SourceIndex:{}", o.index),
-        &format!("/DestinationImageFile:{}", wim.display()),
-        "/Compress:max",
-        "/CheckIntegrity",
-    ])?;
+    let n = o.editions.len();
+    for (k, (index, name)) in o.editions.iter().enumerate() {
+        dism_p(
+            &[
+                "/Export-Image",
+                &format!("/SourceImageFile:{}", img.display()),
+                &format!("/SourceIndex:{index}"),
+                &format!("/DestinationImageFile:{}", wim.display()),
+                "/Compress:max",
+                "/CheckIntegrity",
+            ],
+            &format!("Taking {name} out of the ISO{}", of(k, n)),
+            log,
+        )?;
+    }
     dismount_iso(&o.iso);
 
-    log("Opening the image (a few minutes)".into());
-    dism(&["/Mount-Image", &format!("/ImageFile:{}", wim.display()), "/Index:1", &format!("/MountDir:{}", mount.display())])?;
-
-    // the apps
-    let pkgs = dism(&["/English", &format!("/Image:{}", mount.display()), "/Get-ProvisionedAppxPackages"])?;
-    let names: Vec<&str> = pkgs.lines().filter_map(|l| l.trim().strip_prefix("PackageName : ")).map(str::trim).collect();
     let mut removed = 0;
-    for item in REMOVE.iter().filter(|i| o.on(i.id)) {
-        match &item.what {
-            What::Apps(list) => {
-                log(format!("Removing {}", item.title));
-                for n in names.iter().filter(|n| list.iter().any(|p| n.to_lowercase().starts_with(&p.to_lowercase()))) {
-                    if dism(&[&format!("/Image:{}", mount.display()), "/Remove-ProvisionedAppxPackage", &format!("/PackageName:{n}")]).is_ok() {
-                        removed += 1;
-                    }
-                }
+    let mut reg_fail = Vec::new();
+    for (k, (_, name)) in o.editions.iter().enumerate() {
+        let tag = format!("{name}{}", of(k, n));
+        dism_p(&["/Mount-Image", &format!("/ImageFile:{}", wim.display()), &format!("/Index:{}", k + 1), &format!("/MountDir:{}", mount.display())], &format!("Opening {tag}"), log)?;
+        let r = customize(o, &mount, &tag, log, &mut reg_fail)?;
+        removed = removed.max(r);
+        dism_p(&["/Unmount-Image", &format!("/MountDir:{}", mount.display()), "/Commit"], &format!("Saving {tag}"), log)?;
+    }
+
+    let dest = iso_dir.join("sources").join(o.compress.file());
+    for (k, (_, name)) in o.editions.iter().enumerate() {
+        dism_p(
+            &[
+                "/Export-Image",
+                &format!("/SourceImageFile:{}", wim.display()),
+                &format!("/SourceIndex:{}", k + 1),
+                &format!("/DestinationImageFile:{}", dest.display()),
+                o.compress.arg(),
+            ],
+            &format!("Compressing {name}{}{}", of(k, n), if o.compress == Compress::Recovery { " (install.esd, this takes long)" } else { "" }),
+            log,
+        )?;
+    }
+    let _ = std::fs::remove_file(&wim);
+
+    // the setup itself skips the check too (boot.wim, its 2nd image is Windows Setup)
+    if o.on("hw") {
+        let bm = w.join("bootmount");
+        std::fs::create_dir_all(&bm).map_err(|e| e.to_string())?;
+        let boot = iso_dir.join(r"sources\boot.wim");
+        let _ = sys::exec("attrib.exe", &["-r", &boot.display().to_string()]);
+        dism_p(&["/Mount-Image", &format!("/ImageFile:{}", boot.display()), "/Index:2", &format!("/MountDir:{}", bm.display())], "Setup without the hardware check: opening it", log)?;
+        let loaded = hive("SYSTEM", &bm.join(r"Windows\System32\config\SYSTEM"));
+        if loaded.is_ok() {
+            for n in ["BypassTPMCheck", "BypassSecureBootCheck", "BypassRAMCheck", "BypassCPUCheck", "BypassStorageCheck"] {
+                let _ = set("SYSTEM", r"Setup\LabConfig", n, 1);
             }
-            What::Paths(list) => {
-                log(format!("Removing {}", item.title));
-                for p in *list {
-                    take_and_delete(&mount.join(p));
-                }
-            }
-            What::Own if item.id == "onedrive" => {
-                log("Removing OneDrive".into());
-                take_and_delete(&mount.join(r"Windows\System32\OneDriveSetup.exe"));
-                take_and_delete(&mount.join(r"Windows\SysWOW64\OneDriveSetup.exe"));
-            }
-            _ => {}
+            let _ = sys::exec("reg.exe", &["unload", r"HKLM\zSYSTEM"]);
         }
+        dism_p(&["/Unmount-Image", &format!("/MountDir:{}", bm.display()), "/Commit"], "Setup without the hardware check: saving it", log)?;
+    }
+
+    log("Making the ISO".into());
+    let oscdimg = oscdimg(w)?;
+    let etfs = iso_dir.join(r"boot\etfsboot.com");
+    let efi = iso_dir.join(r"efi\microsoft\boot\efisys.bin");
+    let label = "HEMIMIZER_WIN11";
+    let _ = std::fs::remove_file(&o.out);
+    let mk = run_progress(
+        &oscdimg.display().to_string(),
+        &[
+            "-m",
+            "-o",
+            "-u2",
+            "-udfver102",
+            &format!("-l{label}"),
+            &format!("-bootdata:2#p0,e,b{}#pEF,e,b{}", etfs.display(), efi.display()),
+            &iso_dir.display().to_string(),
+            &o.out.display().to_string(),
+        ],
+        "Making the ISO",
+        log,
+    )?;
+    if mk.code != 0 || !o.out.is_file() {
+        let last = mk.text.split(['\r', '\n']).map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("");
+        return Err(format!("oscdimg {}: {last}", mk.code));
+    }
+    let size = std::fs::metadata(&o.out).map(|m| m.len()).unwrap_or(0);
+    let mut text = format!("{} ({:.1} GB), {} removed", o.out.display(), size as f64 / 1e9, crate::i18n::count(removed, ("app", "apps"), ("aplikace", "aplikace", "aplikací")));
+    if n > 1 {
+        text.push_str(&format!(" from each of {n} editions"));
+    }
+    if !o.winget.is_empty() || !o.installer_files().is_empty() {
+        text.push_str("; your apps are installed at the first sign-in (Windows asks for administrator rights once)");
+    }
+    reg_fail.sort();
+    reg_fail.dedup();
+    if !reg_fail.is_empty() {
+        text.push_str(&format!("; not set: {}", reg_fail.join("; ")));
+    }
+    Ok(text)
+}
+
+/// The script of the first sign-in, in the image (Windows\Setup\Scripts: only administrators may change it there).
+const APPS_SCRIPT: &str = "HeMiMizer-apps.ps1";
+/// The folder of the installers next to it.
+const APPS_DIR: &str = "HeMiMizer-apps";
+
+/// One mounted image: its apps removed, its registry set, drivers and the apps of the first sign-in added, cleaned.
+/// Returns how many apps were removed.
+fn customize(o: &Options, mount: &Path, tag: &str, log: &dyn Fn(String), reg_fail: &mut Vec<String>) -> Result<usize, String> {
+    let image = format!("/Image:{}", mount.display());
+    let pkgs = dism(&[&image, "/Get-ProvisionedAppxPackages"])?;
+    let names: Vec<&str> = pkgs.lines().filter_map(|l| l.trim().strip_prefix("PackageName : ")).map(str::trim).filter(|n| o.goes(n)).collect();
+    let mut removed = 0;
+    for (k, n) in names.iter().enumerate() {
+        log(format!("Removing the apps of {tag} – {} of {} ({}%)", k + 1, names.len(), k * 100 / names.len()));
+        if dism(&[&image, "/Remove-ProvisionedAppxPackage", &format!("/PackageName:{n}")]).is_ok() {
+            removed += 1;
+        }
+    }
+    if o.on("edge") {
+        log(format!("Removing Microsoft Edge from {tag}"));
+        for p in EDGE_PATHS {
+            take_and_delete(&mount.join(p));
+        }
+    }
+    if o.on("onedrive") {
+        log(format!("Removing OneDrive from {tag}"));
+        take_and_delete(&mount.join(r"Windows\System32\OneDriveSetup.exe"));
+        take_and_delete(&mount.join(r"Windows\SysWOW64\OneDriveSetup.exe"));
     }
 
     // the registry of the image
-    log("Setting up the registry of the image".into());
-    let hive = |name: &str, file: &Path| sys::exec("reg.exe", &["load", &format!(r"HKLM\z{name}"), &file.display().to_string()]).map(|o| o.code == 0);
+    log(format!("Setting up the registry of {tag}"));
     hive("SOFTWARE", &mount.join(r"Windows\System32\config\SOFTWARE"))?;
     hive("SYSTEM", &mount.join(r"Windows\System32\config\SYSTEM"))?;
     hive("DEFAULT", &mount.join(r"Users\Default\ntuser.dat"))?;
-    let set = |hive: &str, key: &str, name: &str, v: u32| {
-        sys::exec("reg.exe", &["add", &format!(r"HKLM\z{hive}\{key}"), "/v", name, "/t", "REG_DWORD", "/d", &v.to_string(), "/f"]).map(|_| ())
-    };
-    let mut reg_fail = Vec::new();
     for item in SETTINGS.iter().filter(|i| o.on(i.id)) {
         match &item.what {
             What::Reg(list) => {
@@ -278,14 +600,40 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
     if o.on("onedrive") {
         let _ = sys::exec("reg.exe", &["delete", r"HKLM\zDEFAULT\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "OneDriveSetup", "/f"]);
     }
+    // the apps of the first sign-in: RunOnce of the profile every new user starts from (no quotes needed: the paths have
+    // no spaces; cmd expands %SystemRoot%, and runs nothing once the script has removed itself)
+    let installers = o.installer_files();
+    let first_logon = !o.winget.is_empty() || !installers.is_empty();
+    if first_logon {
+        let script = format!(r"%SystemRoot%\Setup\Scripts\{APPS_SCRIPT}");
+        let cmd = format!(r"cmd.exe /c if exist {script} %SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File {script}");
+        if let Err(e) = sys::exec("reg.exe", &["add", r"HKLM\zDEFAULT\Software\Microsoft\Windows\CurrentVersion\RunOnce", "/v", "HeMiMizer apps", "/t", "REG_SZ", "/d", &cmd, "/f"]) {
+            reg_fail.push(e);
+        }
+    }
     for h in ["zSOFTWARE", "zSYSTEM", "zDEFAULT"] {
         let _ = sys::exec("reg.exe", &["unload", &format!(r"HKLM\{h}")]);
     }
 
     // additions
     if !o.drivers.trim().is_empty() {
-        log("Adding the drivers".into());
-        dism(&[&format!("/Image:{}", mount.display()), "/Add-Driver", &format!("/Driver:{}", o.drivers.trim().trim_matches('"')), "/Recurse"])?;
+        log(format!("Adding the drivers to {tag}"));
+        dism(&[&image, "/Add-Driver", &format!("/Driver:{}", o.drivers.trim().trim_matches('"')), "/Recurse"])?;
+    }
+    if first_logon {
+        log(format!("Adding your apps to {tag}"));
+        let scripts = mount.join(r"Windows\Setup\Scripts");
+        std::fs::create_dir_all(&scripts).map_err(|e| format!("{}: {e}", scripts.display()))?;
+        std::fs::write(scripts.join(APPS_SCRIPT), first_logon_script(&o.winget)).map_err(|e| format!("{APPS_SCRIPT}: {e}"))?;
+        if !installers.is_empty() {
+            let dir = scripts.join(APPS_DIR);
+            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            for f in &installers {
+                if let Some(name) = f.file_name() {
+                    std::fs::copy(f, dir.join(name)).map_err(|e| format!("{}: {e}", f.display()))?;
+                }
+            }
+        }
     }
     if o.add_hemimizer && let Ok(exe) = std::env::current_exe() {
         let desk = mount.join(r"Users\Public\Desktop");
@@ -293,68 +641,63 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
         let _ = std::fs::copy(exe, desk.join("HeMiMizer.exe"));
     }
     if o.deep_clean {
-        log("Cleaning the image (this takes long)".into());
-        dism(&[&format!("/Image:{}", mount.display()), "/Cleanup-Image", "/StartComponentCleanup", "/ResetBase"])?;
+        dism_p(&[&image, "/Cleanup-Image", "/StartComponentCleanup", "/ResetBase"], &format!("Cleaning {tag} (this takes long)"), log)?;
     }
-    log("Saving the image".into());
-    dism(&["/Unmount-Image", &format!("/MountDir:{}", mount.display()), "/Commit"])?;
-    log(if o.esd { "Compressing the image (install.esd, this takes long)".into() } else { "Compressing the image".into() });
-    let dest = iso_dir.join("sources").join(if o.esd { "install.esd" } else { "install.wim" });
-    dism(&[
-        "/Export-Image",
-        &format!("/SourceImageFile:{}", wim.display()),
-        "/SourceIndex:1",
-        &format!("/DestinationImageFile:{}", dest.display()),
-        if o.esd { "/Compress:recovery" } else { "/Compress:max" },
-    ])?;
-    let _ = std::fs::remove_file(&wim);
+    Ok(removed)
+}
 
-    // the setup itself skips the check too (boot.wim, its 2nd image is Windows Setup)
-    if o.on("hw") {
-        log("Setup without the hardware check".into());
-        let bm = w.join("bootmount");
-        std::fs::create_dir_all(&bm).map_err(|e| e.to_string())?;
-        let boot = iso_dir.join(r"sources\boot.wim");
-        let _ = sys::exec("attrib.exe", &["-r", &boot.display().to_string()]);
-        dism(&["/Mount-Image", &format!("/ImageFile:{}", boot.display()), "/Index:2", &format!("/MountDir:{}", bm.display())])?;
-        let loaded = hive("SYSTEM", &bm.join(r"Windows\System32\config\SYSTEM"));
-        if loaded.is_ok() {
-            for n in ["BypassTPMCheck", "BypassSecureBootCheck", "BypassRAMCheck", "BypassCPUCheck", "BypassStorageCheck"] {
-                let _ = set("SYSTEM", r"Setup\LabConfig", n, 1);
-            }
-            let _ = sys::exec("reg.exe", &["unload", r"HKLM\zSYSTEM"]);
-        }
-        dism(&["/Unmount-Image", &format!("/MountDir:{}", bm.display()), "/Commit"])?;
+/// The script of the first sign-in (ASCII, run by Windows PowerShell 5.1): it asks for administrator rights once (UAC),
+/// waits for winget (App Installer is set up for the new user in the first minutes), installs the winget packages,
+/// starts the installers of the folder one after another (the user clicks through them) and removes itself and the
+/// installers when everything went well – else it stays and tells where it is, to be run again.
+fn first_logon_script(ids: &[String]) -> String {
+    let list = ids.iter().filter(|i| valid_winget(i)).map(|i| format!("'{i}'")).collect::<Vec<_>>().join(", ");
+    let script = r#"# HeMiMizer: installs the apps chosen when this Windows ISO was made, once, at the first sign-in.
+$ErrorActionPreference = 'Continue'
+$me = $PSCommandPath
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $admin) {
+    try { Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$me`"") } catch { Write-Host 'Not installed: no administrator rights.' }
+    exit
+}
+$Host.UI.RawUI.WindowTitle = 'Installing your apps (HeMiMizer)'
+$ids = @(@@IDS@@)
+$failed = 0
+if ($ids.Count -gt 0) {
+    Write-Host 'Waiting for winget (App Installer)...'
+    for ($i = 0; $i -lt 120; $i++) {
+        if (Get-Command winget.exe -ErrorAction SilentlyContinue) { break }
+        if ($i -eq 6) { try { Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe } catch { } }
+        Start-Sleep -Seconds 5
     }
-
-    log("Making the ISO".into());
-    let oscdimg = oscdimg(w)?;
-    let etfs = iso_dir.join(r"boot\etfsboot.com");
-    let efi = iso_dir.join(r"efi\microsoft\boot\efisys.bin");
-    let label = "HEMIMIZER_WIN11";
-    let _ = std::fs::remove_file(&o.out);
-    let mk = sys::exec(
-        &oscdimg.display().to_string(),
-        &[
-            "-m",
-            "-o",
-            "-u2",
-            "-udfver102",
-            &format!("-l{label}"),
-            &format!("-bootdata:2#p0,e,b{}#pEF,e,b{}", etfs.display(), efi.display()),
-            &iso_dir.display().to_string(),
-            &o.out.display().to_string(),
-        ],
-    )?;
-    if mk.code != 0 || !o.out.is_file() {
-        return Err(format!("oscdimg {}: {}", mk.code, mk.text.trim().lines().last().unwrap_or("")));
+    foreach ($id in $ids) {
+        Write-Host ''
+        Write-Host "== $id"
+        winget install --id $id --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+        if ($LASTEXITCODE -ne 0) { $failed++; Write-Host "   not installed (code $LASTEXITCODE)" -ForegroundColor Yellow }
     }
-    let size = std::fs::metadata(&o.out).map(|m| m.len()).unwrap_or(0);
-    let mut text = format!("{} ({:.1} GB), {} removed", o.out.display(), size as f64 / 1e9, crate::i18n::count(removed, ("app", "apps"), ("aplikace", "aplikace", "aplikací")));
-    if !reg_fail.is_empty() {
-        text.push_str(&format!("; not set: {}", reg_fail.join("; ")));
+}
+$dir = Join-Path $PSScriptRoot '@@DIR@@'
+if (Test-Path -LiteralPath $dir) {
+    Get-ChildItem -LiteralPath $dir -File | Sort-Object Name | ForEach-Object {
+        Write-Host ''
+        Write-Host "== $($_.Name)"
+        if ($_.Extension -ieq '.msi') { $p = Start-Process -FilePath "$env:SystemRoot\System32\msiexec.exe" -ArgumentList @('/i', "`"$($_.FullName)`"") -Wait -PassThru }
+        else { $p = Start-Process -FilePath $_.FullName -Wait -PassThru }
+        if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { $failed++; Write-Host "   ended with code $($p.ExitCode)" -ForegroundColor Yellow }
     }
-    Ok(text)
+}
+Write-Host ''
+if ($failed -eq 0) {
+    Write-Host 'Done.' -ForegroundColor Green
+    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $me -Force -ErrorAction SilentlyContinue
+} else {
+    Write-Host "$failed did not install. Run this again later (right-click, Run with PowerShell): $me" -ForegroundColor Yellow
+}
+Read-Host 'Press Enter to close'
+"#;
+    script.replace("@@IDS@@", &list).replace("@@DIR@@", APPS_DIR).replace('\n', "\r\n")
 }
 
 /// oscdimg.exe of Microsoft (version 2.56, part of the Windows ADK), from Microsoft's symbol server. The files there carry
@@ -385,5 +728,79 @@ fn take_and_delete(path: &Path) {
         let _ = std::fs::remove_dir_all(path);
     } else {
         let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percentages() {
+        assert_eq!(percent(b"[=====                      10.0%                          ]"), Some(10.0));
+        assert_eq!(percent(b"\r[==========================100.0%==========================] "), Some(100.0));
+        assert_eq!(percent(b"Scanning source tree\r  45% complete"), Some(45.0));
+        assert_eq!(percent(b"Removing the apps - 3 of 9 (33%)"), Some(33.0));
+        assert_eq!(percent(b"Copying the ISO"), None);
+        assert_eq!(percent(b"%"), None);
+    }
+
+    #[test]
+    fn easy_keeps_the_few_apps_and_the_libraries() {
+        let o = Options { easy: true, chosen: easy(), ..Default::default() };
+        for keep in [
+            "Microsoft.WindowsStore_22410.1401.5.0_neutral_~_8wekyb3d8bbwe",
+            "Microsoft.SecHealthUI_1000.26100.1.0_x64__8wekyb3d8bbwe",
+            "Microsoft.WindowsTerminal_3001.18.10301.0_neutral_~_8wekyb3d8bbwe",
+            "Microsoft.WindowsNotepad_11.2410.21.0_neutral_~_8wekyb3d8bbwe",
+            "Microsoft.Windows.Photos_24.24010.29003.0_neutral_~_8wekyb3d8bbwe",
+            "Microsoft.ZuneMusic_11.2408.12.0_neutral_~_8wekyb3d8bbwe",
+            "Microsoft.ScreenSketch_2022.2409.25.0_neutral_~_8wekyb3d8bbwe",
+            "Microsoft.DesktopAppInstaller_2024.709.2344.0_neutral_~_8wekyb3d8bbwe",
+            "Microsoft.VCLibs.140.00_14.0.33519.0_x64__8wekyb3d8bbwe",
+            "Microsoft.HEIFImageExtension_1.0.63001.0_x64__8wekyb3d8bbwe",
+            "Microsoft.WindowsAppRuntime.1.5_5001.178.1908.0_x64__8wekyb3d8bbwe",
+            "Microsoft.MicrosoftEdge.Stable_130.0.2849.68_neutral__8wekyb3d8bbwe",
+        ] {
+            assert!(!o.goes(keep), "{keep}");
+        }
+        for gone in [
+            "Clipchamp.Clipchamp_2.2.8.0_neutral_~_yxz26nhyzhsrt",
+            "Microsoft.BingNews_4.55.62231.0_x64__8wekyb3d8bbwe",
+            "Microsoft.Copilot_1.0.3.0_neutral_~_8wekyb3d8bbwe",
+            "Microsoft.WindowsCalculator_2021.2409.0.0_neutral_~_8wekyb3d8bbwe",
+            "MicrosoftWindows.Client.WebExperience_424.1301.270.9_neutral_~_cw5n1h2txyewy",
+        ] {
+            assert!(o.goes(gone), "{gone}");
+        }
+        // Edge goes only when chosen
+        let mut no_edge = o.clone();
+        no_edge.chosen.push("edge".into());
+        assert!(no_edge.goes("Microsoft.MicrosoftEdge.Stable_130.0.2849.68_neutral__8wekyb3d8bbwe"));
+    }
+
+    #[test]
+    fn custom_removes_only_the_ticked() {
+        let o = Options { apps: vec!["teams".into(), "paint".into()], ..Default::default() };
+        assert!(o.goes("MSTeams_24243.1309.3132.617_x64__8wekyb3d8bbwe"));
+        assert!(o.goes("Microsoft.Paint_11.2410.28.0_neutral_~_8wekyb3d8bbwe"));
+        assert!(!o.goes("Microsoft.BingNews_4.55.62231.0_x64__8wekyb3d8bbwe"));
+        assert!(!o.goes("Microsoft.WindowsStore_22410.1401.5.0_neutral_~_8wekyb3d8bbwe"));
+    }
+
+    #[test]
+    fn winget_ids_and_script() {
+        assert_eq!(winget_ids("Mozilla.Firefox, VideoLAN.VLC;7zip.7zip\n"), vec!["Mozilla.Firefox", "VideoLAN.VLC", "7zip.7zip"]);
+        assert!(valid_winget("Notepad++.Notepad++"));
+        assert!(!valid_winget("a'; rm"));
+        let s = first_logon_script(&["Mozilla.Firefox".into(), "bad'id".into()]);
+        assert!(s.contains("$ids = @('Mozilla.Firefox')"));
+        assert!(s.contains("'HeMiMizer-apps'") && s.is_ascii());
+    }
+
+    #[test]
+    fn dism_errors() {
+        let t = "Deployment Image Servicing and Management tool\r\n[==   5.0%  ]\r\nError: 87\r\n\r\nThe export-image option is unknown.\r\n\r\nThe DISM log file can be found at C:\\Windows\\Logs\\DISM\\dism.log\r\n";
+        assert_eq!(dism_error(87, t), "DISM 0x57: The export-image option is unknown.");
     }
 }

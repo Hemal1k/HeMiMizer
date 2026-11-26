@@ -243,27 +243,90 @@ pub fn dropdown(ui: &mut egui::Ui, p: &Palette, current: usize, items: &[&str], 
         ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
     }
     let mut chosen = None;
+    // the row picked by typing (as in Windows: a letter jumps to the next item that begins with it), kept while open
+    let typed_id = resp.id.with("typed");
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
+    if !open {
+        ui.data_mut(|d| d.remove::<(usize, bool)>(typed_id));
+        // closed, but focused (Tab): a letter chooses the next item with it at once
+        if resp.has_focus()
+            && let Some(i) = typed_letters(ui).into_iter().fold(None, |at: Option<usize>, c| next_with_letter(items, at.unwrap_or(current), c).or(at))
+        {
+            chosen = Some(i);
+        }
+    }
     egui::Popup::menu(&resp).width(width).show(|ui| {
         ui.set_min_width(width - 12.0);
-        for (i, item) in items.iter().enumerate() {
-            let on = i == current;
-            let (r, row) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
-            let painter = ui.painter();
-            if row.hovered() || on {
-                painter.rect_filled(r, 4, if row.hovered() { p.subtle_hover } else { p.subtle_pressed });
-            }
-            if on {
-                let bar = egui::Rect::from_center_size(pos2(r.left() + 2.0, r.center().y), vec2(3.0, 16.0));
-                painter.rect_filled(bar, 2, p.accent);
-            }
-            painter.text(pos2(r.left() + 14.0, r.center().y), Align2::LEFT_CENTER, *item, theme::body(14.0), p.text);
-            if row.clicked() {
-                chosen = Some(i);
-                ui.close();
+        // (the row reached by typing or the arrows, whether it was) – none yet: just opened
+        let before: Option<(usize, bool)> = ui.data(|d| d.get_temp(typed_id));
+        // just opened: the chosen item is shown (a long list scrolls to it)
+        let mut scroll_to = before.is_none().then_some(current);
+        let (mut at, mut typed) = before.unwrap_or((current, false));
+        let mut jumped = false;
+        for c in typed_letters(ui) {
+            if let Some(n) = next_with_letter(items, at, c) {
+                at = n;
+                scroll_to = Some(n);
+                typed = true;
+                jumped = true;
             }
         }
+        // a long list (languages) scrolls instead of running off the screen
+        egui::ScrollArea::vertical().max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
+            for (i, item) in items.iter().enumerate() {
+                let on = i == current;
+                let (r, row) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+                if scroll_to == Some(i) {
+                    row.scroll_to_me(Some(Align::Center));
+                    if jumped {
+                        // Enter chooses it, the arrows go on from it
+                        row.request_focus();
+                    }
+                }
+                if row.has_focus() {
+                    at = i;
+                    typed = true;
+                }
+                let picked = typed && i == at;
+                let painter = ui.painter();
+                if row.hovered() || on || picked {
+                    painter.rect_filled(r, 4, if row.hovered() || picked { p.subtle_hover } else { p.subtle_pressed });
+                }
+                if on {
+                    let bar = egui::Rect::from_center_size(pos2(r.left() + 2.0, r.center().y), vec2(3.0, 16.0));
+                    painter.rect_filled(bar, 2, p.accent);
+                }
+                painter.text(pos2(r.left() + 14.0, r.center().y), Align2::LEFT_CENTER, *item, theme::body(14.0), p.text);
+                if row.clicked() {
+                    chosen = Some(i);
+                    ui.close();
+                }
+            }
+        });
+        // opened and nothing typed yet: the next letter starts from the chosen item
+        ui.data_mut(|d| d.insert_temp(typed_id, (at, typed)));
     });
     chosen
+}
+
+/// The letters typed this frame (Event::Text – the keyboard layout of the user, Czech letters too).
+fn typed_letters(ui: &egui::Ui) -> Vec<char> {
+    ui.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Text(t) => t.chars().next().filter(|c| !c.is_control() && !c.is_whitespace()),
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+/// The next item after `from` whose text begins with `letter` (any case), round from the top again; None when none does.
+fn next_with_letter(items: &[&str], from: usize, letter: char) -> Option<usize> {
+    let n = items.len();
+    let want: String = letter.to_lowercase().collect();
+    (1..=n).map(|k| (from + k) % n).find(|&i| items[i].trim_start().chars().next().is_some_and(|c| c.to_lowercase().collect::<String>() == want))
 }
 
 /// Buttons of the same width side by side, filling the row (the links of About); in a narrow window two or more rows.
@@ -301,4 +364,23 @@ pub fn button_row(ui: &mut egui::Ui, p: &Palette, items: &[(&str, &str)]) -> Opt
         }
     }
     clicked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_letter_jumps_to_the_next_item_with_it() {
+        let items = ["Arabic", "Czech", "Chinese", "Danish", "čeština"];
+        assert_eq!(next_with_letter(&items, 0, 'c'), Some(1));
+        assert_eq!(next_with_letter(&items, 1, 'C'), Some(2));
+        // round from the top again
+        assert_eq!(next_with_letter(&items, 2, 'c'), Some(1));
+        assert_eq!(next_with_letter(&items, 0, 'Č'), Some(4));
+        assert_eq!(next_with_letter(&items, 0, 'x'), None);
+        // the only one with the letter stays
+        assert_eq!(next_with_letter(&items, 3, 'd'), Some(3));
+        assert_eq!(next_with_letter(&[], 0, 'a'), None);
+    }
 }

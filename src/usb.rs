@@ -4,9 +4,11 @@
 //! - FAT32: one partition, which every UEFI starts from. FAT32 holds no file over 4 GB: a bigger install.wim is split
 //!   by DISM into install.swm parts (Windows Setup reads them); any other file that big (an install.esd) needs NTFS.
 //!   Windows formats FAT32 only up to 32 GB, so a bigger stick gets a 32 GB partition.
-//! - NTFS: two partitions, as Microsoft describes it for big images – a small FAT32 "BOOT" with everything but the
-//!   folder sources (and with sources\boot.wim), which UEFI and BIOS start from, and an NTFS one with all the files;
-//!   Windows Setup finds install.wim there.
+//! - NTFS: two partitions, as Microsoft describes it for big images – a small FAT32 "BOOT" with only what starts the
+//!   PC (boot, efi, bootmgr, bootmgr.efi and sources\boot.wim, plus autounattend.xml), which UEFI and BIOS start from,
+//!   and an NTFS one with all the files; Windows Setup (inside boot.wim) looks for install.wim / install.esd on every
+//!   drive and finds it there. The folder support, setup.exe and autorun.inf are only on the NTFS partition (they are
+//!   for running Setup from a running Windows, which is done from that partition).
 //! - MBR: the (boot) partition is active and gets the boot code of Windows (bootsect from the ISO) for BIOS.
 //! - The ISO is opened without a drive letter (into a hidden folder), so no new drive pops up while it works.
 //! - The choices of the installation go into autounattend.xml at the root of the stick (as Rufus does): no TPM 2.0 /
@@ -252,11 +254,12 @@ fn make_from(o: &Options, src: &Path, log: &dyn Fn(String)) -> Result<String, St
 
     let total = folder_size(src);
     match &data {
-        // NTFS: all on the big partition; the start files (no sources but boot.wim) on BOOT
+        // NTFS: all on the big partition; on BOOT only the start files (no sources but boot.wim, no support, setup.exe
+        // and autorun.inf)
         Some(d) => {
             copy(src, d, &[], &[], total, "Copying the files", log)?;
             log("Copying the start files".into());
-            copy(src, &boot, &["sources"], &[], 0, "", log)?;
+            copy(src, &boot, &["sources", "support"], &[src.join("setup.exe"), src.join("autorun.inf")], 0, "", log)?;
             std::fs::create_dir_all(boot.join("sources")).map_err(|e| e.to_string())?;
             std::fs::copy(src.join(r"sources\boot.wim"), boot.join(r"sources\boot.wim")).map_err(|e| format!("boot.wim: {e}"))?;
         }
@@ -266,13 +269,15 @@ fn make_from(o: &Options, src: &Path, log: &dyn Fn(String)) -> Result<String, St
             let skip: Vec<PathBuf> = if big_wim { vec![wim.clone()] } else { Vec::new() };
             copy(src, &boot, &[], &skip, total, "Copying the files", log)?;
             if big_wim {
-                log("Splitting install.wim for FAT32 (a few minutes)".into());
-                let o2 = sys::exec(
+                let o2 = crate::iso::run_progress(
                     "dism.exe",
-                    &["/Split-Image", &format!("/ImageFile:{}", wim.display()), &format!("/SWMFile:{}", boot.join(r"sources\install.swm").display()), "/FileSize:3800"],
+                    &["/English", "/Split-Image", &format!("/ImageFile:{}", wim.display()), &format!("/SWMFile:{}", boot.join(r"sources\install.swm").display()), "/FileSize:3800"],
+                    "Splitting install.wim for FAT32 (a few minutes)",
+                    log,
                 )?;
                 if o2.code != 0 {
-                    return Err(format!("DISM {}: {}", o2.code, o2.text.trim().lines().last().unwrap_or("")));
+                    let last = o2.text.split(['\r', '\n']).map(str::trim).rfind(|l| !l.is_empty() && !l.starts_with('[')).unwrap_or("");
+                    return Err(format!("DISM {}: {last}", o2.code));
                 }
             }
         }
@@ -327,9 +332,9 @@ fn big_files(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// robocopy of `from` into `to` without the folders `skip_dirs` and the files `skip_files`; with `total`, the progress
-/// from what is on the drive.
-fn copy(from: &Path, to: &Path, skip_dirs: &[&str], skip_files: &[PathBuf], total: u64, what: &str, log: &dyn Fn(String)) -> Result<(), String> {
+/// robocopy of `from` into `to` without the folders `skip_dirs` and the files `skip_files` (full paths, or names that
+/// match anywhere); with `total`, the progress from what is on the drive of `to` (which must exist).
+pub(crate) fn copy(from: &Path, to: &Path, skip_dirs: &[&str], skip_files: &[PathBuf], total: u64, what: &str, log: &dyn Fn(String)) -> Result<(), String> {
     let mut args: Vec<String> = vec![from.display().to_string(), to.display().to_string(), "/E".into(), "/R:1".into(), "/W:1".into(), "/NFL".into(), "/NDL".into(), "/NJH".into(), "/NJS".into(), "/NP".into(), "/A-:R".into()];
     if !skip_dirs.is_empty() {
         args.push("/XD".into());
@@ -346,17 +351,18 @@ fn copy(from: &Path, to: &Path, skip_dirs: &[&str], skip_files: &[PathBuf], tota
             break s.code().unwrap_or(16);
         }
         if total > 0 {
-            log(format!("{what} – {:.1} of {:.1} GB", used(to).saturating_sub(before) as f64 / 1e9, total as f64 / 1e9));
+            let done = used(to).saturating_sub(before).min(total);
+            log(format!("{what} – {:.1} of {:.1} GB ({}%)", done as f64 / 1e9, total as f64 / 1e9, done * 100 / total));
         }
         std::thread::sleep(std::time::Duration::from_secs(1));
     };
     if code >= 8 {
-        return Err(format!("Copying failed (robocopy {code}) – is the stick big enough?"));
+        return Err(format!("Copying failed (robocopy {code}) – is there enough free space?"));
     }
     Ok(())
 }
 
-fn folder_size(p: &Path) -> u64 {
+pub(crate) fn folder_size(p: &Path) -> u64 {
     let Ok(rd) = std::fs::read_dir(p) else { return 0 };
     rd.flatten().map(|e| if e.path().is_dir() { folder_size(&e.path()) } else { e.metadata().map(|m| m.len()).unwrap_or(0) }).sum()
 }

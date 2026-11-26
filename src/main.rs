@@ -139,8 +139,8 @@ fn main() -> eframe::Result {
         let iso = std::path::PathBuf::from(&args[1]);
         let eds = iso::editions(&iso);
         log(format!("editions: {eds:?}"));
-        let index = eds.ok().and_then(|v| v.iter().find(|(_, n)| n.ends_with(" Pro")).map(|(i, _)| *i)).unwrap_or(1);
-        let o = iso::Options { iso, index, out: args[2].clone().into(), chosen: iso::simple(), add_hemimizer: true, ..Default::default() };
+        let editions: Vec<(u32, String)> = eds.ok().and_then(|v| v.into_iter().find(|(_, n)| n.ends_with(" Pro"))).into_iter().collect();
+        let o = iso::Options { iso, editions, out: args[2].clone().into(), easy: true, chosen: iso::easy(), add_hemimizer: true, deep_clean: true, ..Default::default() };
         let r = iso::build(&o, &log);
         log(format!("RESULT: {r:?}"));
         return Ok(());

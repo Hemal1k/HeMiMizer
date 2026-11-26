@@ -537,7 +537,9 @@ pub fn remove_myself() {
     let original = original_dir();
     let local = data_dir();
     let fixed = on_fixed_disk(&original);
-    sys::log(&format!("removing HeMiMizer (its folder too: {fixed})"));
+    // installed by its installer: the program stays (it is removed by uninstalling it), only its data goes
+    let installed = crate::selfupdate::installed_in(&original).is_some();
+    sys::log(&format!("removing HeMiMizer (its folder too: {fixed}, installed: {installed})"));
     let home = original.join(crate::config::HOME);
     if cfg!(debug_assertions) && fixed {
         // Debug: the log into %ProgramData%\HeMiMizer before its folder goes
@@ -572,12 +574,12 @@ pub fn remove_myself() {
     if fixed {
         let _ = std::fs::remove_dir_all(&home);
         let file = original.join("HeMiMizer.exe");
-        if std::fs::remove_file(&file).is_err() && file.exists() {
+        if !installed && std::fs::remove_file(&file).is_err() && file.exists() {
             delete_at_restart(&file);
         }
     }
     // the copy for the restarts (or the exe itself) is still running: at the next restart, with its folders
-    if exe.exists() && (fixed || exe.starts_with(&local)) {
+    if exe.exists() && ((fixed && !(installed && exe.starts_with(&original))) || exe.starts_with(&local)) {
         delete_at_restart(&exe);
         if exe.starts_with(local.join("app")) {
             delete_at_restart(&local.join("app"));

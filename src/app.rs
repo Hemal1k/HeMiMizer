@@ -48,7 +48,7 @@ enum Page {
 enum Phase {
     /// "Make a Windows USB stick".
     Usb,
-    /// "Make a smaller Windows".
+    /// "Make a custom Windows ISO".
     Iso,
     /// "Download Windows".
     Download,
@@ -123,6 +123,7 @@ enum Action {
     IsoOpen,
     IsoBrowse,
     IsoDrivers,
+    IsoInstallers,
     IsoMake,
     Start,
     Quit,
@@ -130,11 +131,16 @@ enum Action {
     About(bool),
     /// the own updates on / off (Settings → Updates)
     SetUpdates(bool),
+    /// how often the own updates are looked for, in hours (0 = only at the start)
+    SetUpdateHours(u8),
     /// the newer version downloaded and started in place of this one
     SelfUpdate,
     Open(String),
     OpenLicences,
     OpenLog,
+    /// Settings → Logging on / off
+    SetLogging(bool),
+    OpenSettingsFolder,
     DefaultApps(&'static str),
     RestartNow,
     CancelRestart,
@@ -209,12 +215,14 @@ pub struct HeMiMizerApp {
     has_wifi: bool,
     /// the page "Make a Windows USB stick"
     usb: usb_page::UsbUi,
-    /// the page "Make a smaller Windows"
+    /// the page "Make a custom Windows ISO"
     iso: iso_page::IsoUi,
     /// the page "Download Windows"
     dl: dl_page::DlUi,
     /// a newer HeMiMizer on GitHub (asked at the start, unless switched off or HeMi Launcher keeps it up to date)
     upd: crate::selfupdate::Shared,
+    /// when GitHub was last asked (None = not asked in this run: no checks later either, as after a restart)
+    upd_asked: Option<Instant>,
     backup_on: Vec<bool>,
     backup_done: Vec<Option<Result<String, String>>>,
     backup_now: Option<usize>,
@@ -323,6 +331,7 @@ impl HeMiMizerApp {
             iso: iso_page::IsoUi::new(),
             dl: dl_page::DlUi::new(),
             upd: crate::selfupdate::new(),
+            upd_asked: None,
             backup_now: None,
             backup_log: String::new(),
             btx,
@@ -353,10 +362,36 @@ impl HeMiMizerApp {
             app.start(&cc.egui_ctx);
         } else if !app.look.no_updates && !crate::selfupdate::launcher_present() {
             // a newer HeMiMizer, offered on the first page (never while it works after a restart)
-            let c = cc.egui_ctx.clone();
-            crate::selfupdate::check(app.upd.clone(), move || c.request_repaint());
+            app.check_updates(&cc.egui_ctx);
         }
         app
+    }
+
+    /// Asks GitHub for a newer HeMiMizer in the background (the window is not held up).
+    fn check_updates(&mut self, ctx: &egui::Context) {
+        self.upd_asked = Some(Instant::now());
+        // a download running or a failure shown stays as it is
+        if !matches!(*self.upd.lock().unwrap(), crate::selfupdate::State::None | crate::selfupdate::State::Available { .. }) {
+            return;
+        }
+        let c = ctx.clone();
+        crate::selfupdate::check(self.upd.clone(), move || c.request_repaint());
+    }
+
+    /// While HeMiMizer runs, GitHub is asked again as often as Settings → Updates says (a changed choice counts at once).
+    fn follow_updates(&mut self, ctx: &egui::Context) {
+        if self.look.no_updates {
+            return;
+        }
+        let (Some(asked), Some(every)) = (self.upd_asked, self.look.update_interval()) else { return };
+        if asked.elapsed() >= every {
+            if crate::selfupdate::launcher_present() {
+                // HeMi Launcher came meanwhile: it keeps HeMiMizer up to date
+                self.upd_asked = Some(Instant::now());
+            } else {
+                self.check_updates(ctx);
+            }
+        }
     }
 
     fn start(&mut self, ctx: &egui::Context) {
@@ -479,7 +514,7 @@ impl HeMiMizerApp {
                     Phase::Start => tr("Set up this PC", "Nastavit toto PC"),
                     Phase::Unlock => "Protected backup",
                     Phase::Usb => "Windows USB stick",
-                    Phase::Iso => "A smaller Windows",
+                    Phase::Iso => "Custom Windows ISO",
                     Phase::Download => "Download Windows",
                     _ => "HeMiMizer",
                 }
@@ -524,12 +559,64 @@ impl HeMiMizerApp {
                 if crate::selfupdate::launcher_present() {
                     crate::widgets::two_lines(ui, &p, "Updates", "HeMi Launcher keeps HeMiMizer up to date.");
                 } else {
-                    crate::widgets::two_lines(ui, &p, "Look for a new version at the start", "Asks GitHub for the newest release and offers it on the first page.");
+                    crate::widgets::two_lines(
+                        ui,
+                        &p,
+                        tr("Look for new versions automatically", "Automaticky hledat nové verze"),
+                        tr("Asks GitHub for the newest release and offers it on the first page.", "Zeptá se GitHubu na nejnovější verzi a nabídne ji na první stránce."),
+                    );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if crate::widgets::toggle(ui, &p, !self.look.no_updates).clicked() {
                             acts.push(Action::SetUpdates(self.look.no_updates));
                         }
                     });
+                }
+            });
+        });
+        // how often: only while the automatic updates are on
+        if !self.look.no_updates && !crate::selfupdate::launcher_present() {
+            card(ui, &p, |ui| {
+                row_layout(ui, 44.0, |ui| {
+                    ui.label(RichText::new(tr("How often", "Jak často")).size(14.0).color(p.text));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let names = [
+                            tr("Only at the start", "Jen při spuštění"),
+                            tr("Every hour", "Každou hodinu"),
+                            tr("Every 3 hours", "Každé 3 hodiny"),
+                            tr("Every 6 hours", "Každých 6 hodin"),
+                            tr("Once a day", "Jednou denně"),
+                        ];
+                        let hours = crate::look::UPDATE_HOURS;
+                        let now = hours.iter().position(|&h| h == self.look.update_hours).unwrap_or(3);
+                        if let Some(i) = crate::widgets::dropdown(ui, &p, now, &names, 220.0)
+                            && let Some(&h) = hours.get(i)
+                        {
+                            acts.push(Action::SetUpdateHours(h));
+                        }
+                    });
+                });
+            });
+        }
+        ui.add_space(14.0);
+        section(ui, &p, "Troubleshooting");
+        card(ui, &p, |ui| {
+            row_layout(ui, 52.0, |ui| {
+                crate::widgets::two_lines(ui, &p, "Logging", "Writes what HeMiMizer does to HeMiMizer.log (no passwords). Off by default.");
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if crate::widgets::toggle(ui, &p, self.look.logging || cfg!(debug_assertions)).clicked() {
+                        acts.push(Action::SetLogging(!self.look.logging));
+                    }
+                });
+            });
+        });
+        card(ui, &p, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if Btn::new("Open log").enabled(sys::log_path().is_file()).show(ui, &p).clicked() {
+                    acts.push(Action::OpenLog);
+                }
+                if Btn::new("Open settings folder").show(ui, &p).clicked() {
+                    acts.push(Action::OpenSettingsFolder);
                 }
             });
         });
@@ -547,12 +634,11 @@ impl HeMiMizerApp {
         };
         value(ui, "Author", "Richard Hemala");
         value(ui, "Version", env!("CARGO_PKG_VERSION"));
-        let items = [("Project on GitHub", REPO), ("Report a problem", ""), ("Log", "HeMiMizer.log"), ("Licenses", "")];
+        let items = [("Project on GitHub", REPO), ("Report a problem", ""), ("Licenses", "")];
         if let Some(i) = card(ui, &p, |ui| crate::widgets::button_row(ui, &p, &items)) {
             acts.push(match i {
                 0 => Action::Open(REPO.into()),
                 1 => Action::Open(format!("{REPO}/issues")),
-                2 => Action::OpenLog,
                 _ => Action::OpenLicences,
             });
         }
@@ -678,8 +764,8 @@ impl HeMiMizerApp {
         big(
             ui,
             glyph::DISC,
-            "Make a smaller Windows",
-            "A lighter Windows 11 ISO like Tiny11: without ads, Teams, Xbox, OneDrive… – the simple choice, or choose yourself what goes and what stays.",
+            "Make a custom Windows ISO",
+            "A Windows 11 ISO without ads and extra apps – the easy choice, or choose yourself what goes, what stays and what is added.",
             Action::IsoOpen,
             acts,
         );
@@ -688,7 +774,7 @@ impl HeMiMizerApp {
             ui,
             glyph::DOWNLOAD,
             "Download Windows",
-            "The ISO of Windows 11 or 10 in your language, straight from Microsoft's servers.",
+            "The ISO of Windows 11 or 10 in your language.",
             Action::DlOpen,
             acts,
         );
@@ -2327,6 +2413,11 @@ impl HeMiMizerApp {
                         self.iso.drivers = d.display().to_string();
                     }
                 }
+                Action::IsoInstallers => {
+                    if let Some(d) = rfd::FileDialog::new().set_title("Installers").pick_folder() {
+                        self.iso.installers = d.display().to_string();
+                    }
+                }
                 Action::IsoMake => {
                     let o = self.iso.options();
                     *self.iso.state.lock().unwrap() = Some(("Starting".into(), None));
@@ -2445,9 +2536,13 @@ impl HeMiMizerApp {
                     self.look.no_updates = !on;
                     self.look.save();
                     if on {
-                        let c = ctx.clone();
-                        crate::selfupdate::check(self.upd.clone(), move || c.request_repaint());
+                        self.check_updates(ctx);
                     }
+                }
+                Action::SetUpdateHours(h) => {
+                    // counted from the last question to GitHub, so the new choice holds at once
+                    self.look.update_hours = h;
+                    self.look.save();
                 }
                 Action::SelfUpdate => {
                     let c = ctx.clone();
@@ -2459,6 +2554,25 @@ impl HeMiMizerApp {
                     let log = sys::log_path();
                     if log.exists() {
                         sys::shell_open(&log.display().to_string());
+                    }
+                }
+                Action::SetLogging(on) => {
+                    self.look.logging = on;
+                    self.look.save();
+                    // a Debug build always writes its own log
+                    if !cfg!(debug_assertions) {
+                        if on {
+                            sys::log_on();
+                            sys::log(&format!("Logging on, HeMiMizer {}", env!("CARGO_PKG_VERSION")));
+                        } else {
+                            sys::log_close();
+                        }
+                    }
+                }
+                Action::OpenSettingsFolder => {
+                    if let Some(d) = crate::look::dir() {
+                        let _ = std::fs::create_dir_all(&d);
+                        let _ = std::process::Command::new(sys::program("explorer.exe")).arg(&d).spawn();
                     }
                 }
                 Action::OpenLicences => {
@@ -2546,6 +2660,7 @@ impl eframe::App for HeMiMizerApp {
         let ctx = ui.ctx().clone();
         self.poll();
         self.follow_theme(&ctx);
+        self.follow_updates(&ctx);
         ctx.request_repaint_after(Duration::from_secs(1));
 
         if self.restart_at.is_some_and(|t| Instant::now() >= t) {

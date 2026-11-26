@@ -1,9 +1,9 @@
-//! The page "Download Windows": the ISO of Windows 11 or 10 in the language chosen, straight from Microsoft (msiso.rs).
+//! The page "Download Windows": the ISO of Windows 11 or 10 in the language chosen (msiso.rs).
 
 use super::{Action, HeMiMizerApp};
 use crate::msiso::{self, Language, Product, Session};
 use crate::theme::glyph;
-use crate::widgets::{Btn, Tone, card, info_bar, section};
+use crate::widgets::{Btn, Tone, card, dropdown, info_bar, section};
 use eframe::egui::{self, RichText};
 use std::sync::{Arc, Mutex};
 
@@ -82,25 +82,26 @@ impl HeMiMizerApp {
     pub(super) fn dl_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let p = self.p;
         let state = self.dl.state.lock().unwrap().clone();
+        let running = matches!(&state, Some((_, _, None)));
+        // the page stays as it is; its state (with the progress) is on top
         if let Some((done, total, r)) = &state {
             match r {
                 None => {
                     let text = if *total > 0 {
-                        format!("Downloading – {:.1} of {:.1} GB", *done as f64 / 1e9, *total as f64 / 1e9)
+                        format!("Downloading – {:.1} of {:.1} GB ({}%)", *done as f64 / 1e9, *total as f64 / 1e9, done * 100 / (*total).max(1))
                     } else {
-                        "Asking Microsoft for the link…".to_string()
+                        "Getting the download link…".to_string()
                     };
-                    ui.horizontal(|ui| {
-                        ui.add(egui::Spinner::new().size(18.0).color(p.accent_text));
-                        ui.label(RichText::new(text).size(14.0).color(p.text));
+                    card(ui, &p, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new().size(16.0).color(p.accent_text));
+                            ui.label(RichText::new(text).size(14.0).color(p.text));
+                        });
+                        if *total > 0 {
+                            ui.add_space(6.0);
+                            ui.add(egui::ProgressBar::new(*done as f32 / *total as f32).desired_height(6.0).fill(p.accent));
+                        }
                     });
-                    if *total > 0 {
-                        ui.add_space(8.0);
-                        ui.add(egui::ProgressBar::new(*done as f32 / *total as f32).desired_height(6.0).fill(p.accent));
-                    }
-                    ui.add_space(6.0);
-                    ui.label(RichText::new("From Microsoft's own servers. It may be stopped – started again, it goes on.").size(12.0).color(p.text3));
-                    return;
                 }
                 Some(Ok(iso)) => {
                     info_bar(ui, &p, Tone::Success, &format!("Downloaded: {}", iso.display()), None);
@@ -109,7 +110,7 @@ impl HeMiMizerApp {
                         if Btn::new("Make a USB stick from it").icon(glyph::USB).accent().show(ui, &p).clicked() {
                             acts.push(Action::DlToUsb(iso.display().to_string()));
                         }
-                        if Btn::new("Make a smaller Windows from it").icon(glyph::DISC).show(ui, &p).clicked() {
+                        if Btn::new("Make a custom ISO from it").icon(glyph::DISC).show(ui, &p).clicked() {
                             acts.push(Action::DlToIso(iso.display().to_string()));
                         }
                     });
@@ -120,6 +121,11 @@ impl HeMiMizerApp {
             };
             ui.add_space(12.0);
         }
+        ui.add_enabled_ui(!running, |ui| self.dl_form(ui, acts));
+    }
+
+    fn dl_form(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        let p = self.p;
         let ctx = ui.ctx().clone();
         let d = &mut self.dl;
         section(ui, &p, "Windows");
@@ -139,19 +145,25 @@ impl HeMiMizerApp {
                 Some(None) | None => {
                     ui.horizontal(|ui| {
                         ui.add(egui::Spinner::new().size(14.0).color(p.accent_text));
-                        ui.label(RichText::new("Asking Microsoft for the languages…").size(13.0).color(p.text2));
+                        ui.label(RichText::new("Getting the languages…").size(13.0).color(p.text2));
                     });
                 }
                 Some(Some(Err(e))) => {
                     ui.label(RichText::new(e.as_str()).size(13.0).color(p.critical));
                 }
                 Some(Some(Ok((_, list)))) => {
-                    let shown = list.iter().find(|l| l.sku == d.lang).map(|l| l.name.clone()).unwrap_or_else(|| "Choose…".into());
-                    egui::ComboBox::from_id_salt("dl-lang").selected_text(shown).width(260.0).height(400.0).show_ui(ui, |ui| {
-                        for l in list {
-                            ui.selectable_value(&mut d.lang, l.sku.clone(), l.name.as_str());
-                        }
-                    });
+                    // "Choose…" first until a language is chosen; a typed letter jumps to the languages with it
+                    let mut names: Vec<&str> = list.iter().map(|l| l.name.as_str()).collect();
+                    let now = list.iter().position(|l| l.sku == d.lang);
+                    let offset = usize::from(now.is_none());
+                    if now.is_none() {
+                        names.insert(0, "Choose…");
+                    }
+                    if let Some(i) = dropdown(ui, &p, now.unwrap_or(0), &names, 260.0)
+                        && let Some(l) = i.checked_sub(offset).and_then(|i| list.get(i))
+                    {
+                        d.lang = l.sku.clone();
+                    }
                 }
             });
             ui.add_space(10.0);

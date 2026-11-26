@@ -221,7 +221,9 @@ pub fn reg_import_under(text: &str, allowed: &[&str]) -> Result<(), String> {
         log(&format!("reg import refused, key outside {allowed:?}: {key}"));
         return Err(format!("{} {key}", crate::i18n::tr("Not imported – the backup holds a key outside the allowed ones:", "Neimportováno – záloha obsahuje klíč mimo povolené:")));
     }
-    log(&format!("reg import:\n{}", text.trim()));
+    // only the keys go to the log, not the values: the settings of a program may hold its saved logins (WinSCP, PuTTY…)
+    let keys: Vec<&str> = text.lines().map(str::trim).filter(|l| l.starts_with('[')).collect();
+    log(&format!("reg import ({} lines), keys:\n{}", text.lines().count(), keys.join("\n")));
     let file = scripts_dir()?.join(format!("import-{}.reg", std::process::id()));
     let mut bytes = vec![0xFF, 0xFE];
     for u in text.encode_utf16() {
@@ -284,10 +286,14 @@ pub fn exec(exe: &str, args: &[&str]) -> Result<Output, String> {
 
 static LOG: std::sync::Mutex<Option<(PathBuf, std::fs::File)>> = std::sync::Mutex::new(None);
 
-/// HeMiMizer.log in "HeMiMizer data" next to HeMiMizer.exe; %LOCALAPPDATA%\HeMiMizer when that folder is read-only.
-/// Only in Debug builds: the release writes no log at all (the user, 2026-11-18 – nothing of HeMiMizer stays on the PC).
+/// Debug builds: HeMiMizer.log in "HeMiMizer data" next to HeMiMizer.exe; %LOCALAPPDATA%\HeMiMizer when that folder is
+/// read-only. The release writes one only when Settings → Logging is on (off by default – the user, 2026-11-18: nothing
+/// of HeMiMizer stays on the PC unless asked): %AppData%\HeMi\HeMiMizer\HeMiMizer.log, over 1 MB started anew.
 pub fn log_init() {
     if !cfg!(debug_assertions) {
+        if crate::look::Look::load().logging {
+            log_on();
+        }
         return;
     }
     let data = state_dir();
@@ -309,6 +315,22 @@ pub fn log_init() {
             *LOG.lock().unwrap() = Some((p, f));
             return;
         }
+    }
+}
+
+/// The log of the released HeMiMizer (Settings → Logging turned on).
+pub fn log_on() {
+    if LOG.lock().unwrap().is_some() {
+        return;
+    }
+    let Some(dir) = crate::look::dir() else { return };
+    let p = dir.join("HeMiMizer.log");
+    let _ = std::fs::create_dir_all(&dir);
+    if std::fs::metadata(&p).is_ok_and(|m| m.len() > 1_000_000) {
+        let _ = std::fs::remove_file(&p);
+    }
+    if let Ok(f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        *LOG.lock().unwrap() = Some((p, f));
     }
 }
 

@@ -44,9 +44,9 @@ if you changed them) stay, and on a USB stick HeMiMizer.exe and the backup stay 
 
 | Tool | What it does |
 |---|---|
-| Download Windows | The ISO of Windows 11 or 10 in the language you choose, straight from Microsoft's servers, with its progress – then a USB stick or a smaller Windows from it in one click. |
+| Download Windows | The ISO of Windows 11 or 10 in the language you choose, straight from Microsoft's servers, with its progress – then a USB stick or a custom ISO from it in one click. |
 | Make a Windows USB stick | From a Windows 10 / 11 ISO, like Rufus: GPT (UEFI) or MBR (BIOS or UEFI), NTFS (a small FAT32 boot partition and an NTFS one – images of any size) or FAT32 with a split install.wim, the name from the ISO, and your choices for the installation – no TPM 2.0 / Secure Boot / RAM check, no Microsoft account required, a local account, the region and time zone you pick, no privacy questions, no automatic BitLocker. |
-| Make a smaller Windows | A lighter Windows 11 ISO in the spirit of Tiny11, by HeMiMizer's own list: one edition, without ads, Teams, Clipchamp, Xbox, OneDrive and other extras, no TPM check, no Microsoft account needed – the simple choice, or choose yourself what goes and what stays; drivers and HeMiMizer can be added. |
+| Make a custom Windows ISO | A Windows 11 ISO by HeMiMizer's own list, with one or more editions. Easy keeps only Store, Windows Security, Terminal, Notepad, Photos, Media Player and Snipping Tool, turns AI, ads and OneDrive off and installs without TPM and a Microsoft account (Edge stays or goes, as you choose). Custom lets you pick every app and setting and the compression. Drivers, winget apps and your own installers (run at the first sign-in) and HeMiMizer can be added. |
 | Updates itself | At the start it asks GitHub for a newer HeMiMizer and offers it on the first page – downloaded, checked against the release checksums and started in place of the old one (Settings → Updates; with HeMi Launcher on the PC the launcher does it). |
 
 Programs with their own license terms are listed during setup, each with a link: HeMiMizer installs them only after you
@@ -57,22 +57,23 @@ and the HeMi apps and ArtCraft from their releases), the **winget** sources (the
 come from their makers, and winget has its own telemetry), **Microsoft** (winget itself if it is missing, Visual C++,
 DirectX and .NET, Windows Update and Microsoft Store updates, `www.msftconnecttest.com` to see if the PC is online, the
 **Download Windows** tool with the session check of Microsoft's download page – Microsoft's own device check
-script, as with Fido and Rufus –, and `oscdimg.exe` for **Make a smaller
-Windows**), **amd.com** (the AMD drivers), your network drives (from the backup) and – only if you turn on Encrypted DNS –
+script, as with Fido and Rufus –, and `oscdimg.exe` for **Make a custom
+Windows ISO**), **amd.com** (the AMD drivers), your network drives (from the backup) and – only if you turn on Encrypted DNS –
 **Cloudflare** (1.1.1.1 over HTTPS for all DNS queries of the PC). No telemetry; nothing about you or this PC is sent.
 
 ## Download
 
 | File | For |
 |---|---|
-| `HeMiMizer.exe` | The program for x64 – one file, run it from any folder (it asks for administrator rights). |
+| `HeMiMizer-Setup.exe` | The installer for x64 – for you only or for all users, a shortcut in Start; HeMiMizer updates itself through it. |
+| `HeMiMizer.exe` | The portable program for x64 – one file, run it from any folder, e.g. a USB stick (it asks for administrator rights). |
 
 Windows 11 (Windows 10 mostly works), x64 only. Also in [HeMi Launcher](https://github.com/Hemal1k/HeMiLauncher).
 
 ## Build
 
-Rust (stable, MSVC). `cargo build --release` gives `build\release\HeMiMizer.exe`; `.\release.ps1` builds the download
-(`build\dist\HeMiMizer.exe`; the GitHub workflow does the same for every release). A debug build runs without administrator rights, for trying the window.
+Rust (stable, MSVC). `cargo build --release` gives `build\release\HeMiMizer.exe`; `.\release.ps1` builds the downloads
+(`build\dist\HeMiMizer-Setup.exe` with Inno Setup 6 and `build\dist\HeMiMizer.exe`; the GitHub workflow does the same for every release). A debug build runs without administrator rights, for trying the window.
 
 | Folder | What |
 |---|---|
@@ -83,7 +84,8 @@ Rust (stable, MSVC). `cargo build --release` gives `build\release\HeMiMizer.exe`
 | `src\backup.rs`, `src\config.rs`, `src\appdata.rs` | The backup: settings, installers, your own folders, program settings. |
 | `src\crypto.rs` | The backup with a password (AES-256-GCM, PBKDF2-SHA256). |
 | `src\shortcuts.rs` | Desktop, Start, taskbar and starting with Windows for the new programs. |
-| `src\usb.rs`, `src\iso.rs`, `src\msiso.rs` | The tools: a Windows USB stick, a smaller Windows ISO, the download of Windows from Microsoft. |
+| `src\usb.rs`, `src\iso.rs`, `src\msiso.rs` | The tools: a Windows USB stick, a custom Windows ISO, the download of Windows. |
+| `installer\HeMiMizer.iss` | The installer (Inno Setup 6), built by `release.ps1`. |
 
 ## License
 
