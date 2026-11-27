@@ -192,6 +192,9 @@ pub struct HeMiMizerApp {
     about: bool,
     dialog: Option<Dialog>,
     close_warned: bool,
+    /// The page and the height of its content the window was last made taller for: it grows again only for another
+    /// page or more content, never against a size the user chose.
+    fit: (usize, f32),
     /// the run ended before a restart – HeMiMizer continues later, so it must not remove itself
     resume_pending: bool,
     removed: bool,
@@ -310,6 +313,7 @@ impl HeMiMizerApp {
             about: false,
             dialog: None,
             close_warned: false,
+            fit: (usize::MAX, 0.0),
             resume_pending: false,
             removed: false,
             fresh: mode == Mode::Normal,
@@ -2650,6 +2654,37 @@ fn pick_exe(current: &str) -> Option<String> {
     d.pick_file().map(|p| p.display().to_string())
 }
 
+impl HeMiMizerApp {
+    /// The content of a page taller than the window: the window grows to show it all (at most to the height of the
+    /// screen, moved up when it would reach under it); the rest scrolls.
+    fn fit_window(&mut self, ctx: &egui::Context, page: usize, content: f32, visible: f32) {
+        let over = content - visible;
+        let grew = page != self.fit.0 || content > self.fit.1 + 1.0;
+        if over <= 1.0 || !grew {
+            if page != self.fit.0 {
+                self.fit = (page, content);
+            }
+            return;
+        }
+        self.fit = (page, content);
+        let (inner, outer, monitor) = ctx.input(|i| (i.viewport().inner_rect, i.viewport().outer_rect, i.viewport().monitor_size));
+        let (Some(inner), Some(outer), Some(monitor)) = (inner, outer, monitor) else { return };
+        // the taskbar and the title bar stay free
+        let frame = outer.height() - inner.height();
+        let max = monitor.y - 56.0 - frame;
+        let h = (inner.height() + over + 4.0).min(max);
+        if h <= inner.height() + 1.0 {
+            return;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(inner.width(), h)));
+        let bottom = outer.min.y + frame + h;
+        if outer.min.y >= 0.0 && bottom > monitor.y - 56.0 {
+            let y = (monitor.y - 56.0 - frame - h).max(0.0);
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(outer.min.x, y)));
+        }
+    }
+}
+
 impl eframe::App for HeMiMizerApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         // a download of Windows that runs ends with the window
@@ -2725,7 +2760,7 @@ impl eframe::App for HeMiMizerApp {
                 Phase::Running => 3,
                 Phase::Finished => 4,
             };
-            egui::ScrollArea::vertical().id_salt(page_key).auto_shrink([false, false]).show(ui, |ui| {
+            let out = egui::ScrollArea::vertical().id_salt(page_key).auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
                 match self.phase {
                     Phase::Choose => self.choose_page(ui, &mut acts),
@@ -2743,6 +2778,7 @@ impl eframe::App for HeMiMizerApp {
                     Phase::Finished => self.result_page(ui, &mut acts),
                 }
             });
+            self.fit_window(&ctx, page_key, out.content_size.y, out.inner_rect.height());
         });
         self.dialog(&ctx);
         self.act(&ctx, acts);

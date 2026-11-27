@@ -36,6 +36,12 @@ pub struct IsoUi {
     pub drivers: String,
     /// winget ids, as typed
     pub winget: String,
+    /// the winget ids of the most used apps ticked (iso_apps::POPULAR)
+    pub popular: Vec<String>,
+    /// the drivers ticked (iso_apps::DRIVERS)
+    pub driver_dl: Vec<String>,
+    /// the apps of PC makers and devices ticked (iso_apps::VENDOR)
+    pub vendor: Vec<String>,
     pub installers: String,
     pub add_hemimizer: bool,
     pub out: String,
@@ -99,7 +105,22 @@ impl IsoUi {
             apps,
             chosen,
             drivers: self.drivers.trim().to_string(),
-            winget: iso::winget_ids(&self.winget),
+            winget: {
+                // the ticked ones first, then the typed ones (each once)
+                let mut ids: Vec<String> = crate::iso_apps::POPULAR
+                    .iter()
+                    .map(|(i, _)| i.to_string())
+                    .filter(|i| self.popular.contains(i))
+                    .chain(crate::iso_apps::VENDOR.iter().map(|v| v.0.to_string()).filter(|i| self.vendor.contains(i)))
+                    .collect();
+                for i in iso::winget_ids(&self.winget) {
+                    if !ids.iter().any(|x| x.eq_ignore_ascii_case(&i)) {
+                        ids.push(i);
+                    }
+                }
+                ids
+            },
+            driver_dl: self.driver_dl.clone(),
             installers: self.installers.trim().to_string(),
             add_hemimizer: self.add_hemimizer,
             compress,
@@ -305,27 +326,66 @@ impl HeMiMizerApp {
             });
         }
         ui.add_space(8.0);
-        section(ui, &p, "Add (optional)");
+        section(ui, &p, "Apps (optional)");
         card(ui, &p, |ui| {
-            ui.label(RichText::new("Drivers – a folder with .inf files (network, storage, graphics…)").size(13.0).color(p.text));
-            if Self::path_row(ui, &p, &mut s.drivers, "Empty = none") {
-                acts.push(Action::IsoDrivers);
-            }
+            ui.columns(3, |cols| {
+                let third = crate::iso_apps::POPULAR.len().div_ceil(3);
+                for (k, (id, name)) in crate::iso_apps::POPULAR.iter().enumerate() {
+                    let ui = &mut cols[k / third];
+                    let mut on = s.popular.iter().any(|x| x == id);
+                    if ui.checkbox(&mut on, RichText::new(*name).size(13.5).color(p.text)).changed() {
+                        flip(&mut s.popular, id, on);
+                    }
+                }
+            });
             ui.add_space(8.0);
-            ui.label(RichText::new("Apps from winget, installed at the first sign-in (ids, e.g. Mozilla.Firefox 7zip.7zip)").size(13.0).color(p.text));
+            ui.label(RichText::new("Other apps from winget (ids, e.g. Spotify.Spotify Discord.Discord)").size(13.0).color(p.text));
             ui.add(egui::TextEdit::singleline(&mut s.winget).desired_width(f32::INFINITY).margin(vec2(8.0, 6.0)).hint_text("Empty = none"));
             let bad = s.bad_winget();
             if !bad.is_empty() {
                 ui.label(RichText::new(format!("Not a winget id: {}", bad.join(", "))).size(12.0).color(p.critical));
             }
             ui.add_space(8.0);
-            ui.label(RichText::new("Installers – a folder whose .exe and .msi files run one by one at the first sign-in").size(13.0).color(p.text));
+            ui.label(RichText::new("Your installers – a folder with .msi files, or .exe made with Inno Setup, NSIS or WiX").size(13.0).color(p.text));
             if Self::path_row(ui, &p, &mut s.installers, "Empty = none") {
                 acts.push(Action::IsoInstallers);
             }
-            ui.label(RichText::new("The apps install after the first sign-in, with the internet on; Windows asks for administrator rights once.").size(11.5).color(p.text3));
+            ui.label(
+                RichText::new("Downloaded now and built into the ISO, like on a new PC: Windows installs them quietly while it sets itself up – nothing is installed or clicked after the first sign-in.")
+                    .size(11.5)
+                    .color(p.text3),
+            );
             ui.add_space(8.0);
             ui.checkbox(&mut s.add_hemimizer, RichText::new("HeMiMizer on the desktop of the new Windows").size(13.5).color(p.text));
+        });
+        ui.add_space(8.0);
+        section(ui, &p, "Drivers (optional)");
+        card(ui, &p, |ui| {
+            for (id, name, detail) in crate::iso_apps::DRIVERS {
+                if let Some(on) = check(ui, &p, s.driver_dl.iter().any(|x| x == id), name, detail) {
+                    flip(&mut s.driver_dl, id, on);
+                }
+            }
+            ui.label(RichText::new("Each goes in only on a PC with that hardware. NVIDIA and AMD drivers are for x64 PCs.").size(11.5).color(p.text3));
+            ui.add_space(8.0);
+            ui.label(RichText::new("Other drivers – a folder with .inf files (network, storage…)").size(13.0).color(p.text));
+            if Self::path_row(ui, &p, &mut s.drivers, "Empty = none") {
+                acts.push(Action::IsoDrivers);
+            }
+        });
+        ui.add_space(8.0);
+        section(ui, &p, "Apps of PC makers and devices (optional)");
+        card(ui, &p, |ui| {
+            for (id, name, detail, _) in crate::iso_apps::VENDOR {
+                if let Some(on) = check(ui, &p, s.vendor.iter().any(|x| x == id), name, detail) {
+                    flip(&mut s.vendor, id, on);
+                }
+            }
+            ui.label(
+                RichText::new("Each goes in only on a PC of that maker (or with that board), or with such a mouse, keyboard or headset plugged in. Lenovo Vantage, Dell SupportAssist and MyASUS are only in the Microsoft Store; Razer Synapse cannot be installed quietly.")
+                    .size(11.5)
+                    .color(p.text3),
+            );
         });
         ui.add_space(10.0);
         section(ui, &p, "Save as");

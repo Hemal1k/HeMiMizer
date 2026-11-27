@@ -1,7 +1,7 @@
 //! The page "Download Windows": the ISO of Windows 11 or 10 in the language chosen (msiso.rs).
 
 use super::{Action, HeMiMizerApp};
-use crate::msiso::{self, Language, Product, Session};
+use crate::msiso::{self, Arch, Language, Product, Session};
 use crate::theme::glyph;
 use crate::widgets::{Btn, Tone, card, dropdown, info_bar, section};
 use eframe::egui::{self, RichText};
@@ -13,6 +13,8 @@ type Langs = Result<(Arc<Session>, Vec<Language>), String>;
 #[derive(Default)]
 pub struct DlUi {
     pub product: Option<Product>,
+    /// the processor: Windows 11 x64 / Arm64, Windows 10 64-bit / 32-bit
+    pub arch: Option<Arch>,
     /// the languages of the product chosen: None = not yet, Some(None) = reading
     pub langs: Arc<Mutex<Option<Option<Langs>>>>,
     pub lang: String,
@@ -38,8 +40,10 @@ impl DlUi {
         !self.running() && !self.lang.is_empty() && std::path::Path::new(self.folder.trim()).is_dir() && matches!(*self.langs.lock().unwrap(), Some(Some(Ok(_))))
     }
 
-    /// A product chosen: its languages from Microsoft, in the background.
-    pub fn choose(&mut self, p: Product, ctx: &egui::Context) {
+    /// Windows and its processor chosen: the languages of that product from Microsoft, in the background (Windows 11
+    /// Arm64 is a product of its own; Windows 10 32-bit is another link of the same one).
+    pub fn choose(&mut self, p: Product, arch: Arch, ctx: &egui::Context) {
+        self.arch = Some(arch);
         if self.product == Some(p) {
             return;
         }
@@ -58,11 +62,12 @@ impl DlUi {
     pub fn start(&mut self, ctx: &egui::Context) {
         let Some(Some(Ok((session, langs)))) = self.langs.lock().unwrap().clone() else { return };
         let Some(lang) = langs.iter().find(|l| l.sku == self.lang).cloned() else { return };
+        let arch = self.arch.unwrap_or(Arch::X64);
         let folder = std::path::PathBuf::from(self.folder.trim());
         *self.state.lock().unwrap() = Some((0, 0, None));
         let (state, ctx) = (self.state.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let r = msiso::link(&session, &lang).and_then(|(url, file)| {
+            let r = msiso::link(&session, &lang, arch).and_then(|(url, file)| {
                 let dest = folder.join(&file);
                 let progress = |done: u64, total: u64| {
                     *state.lock().unwrap() = Some((done, total, None));
@@ -142,12 +147,31 @@ impl HeMiMizerApp {
         let d = &mut self.dl;
         section(ui, &p, "Windows");
         card(ui, &p, |ui| {
-            for prod in [Product::Windows11, Product::Windows10] {
-                if ui.radio(d.product == Some(prod), RichText::new(prod.name()).size(13.5).color(p.text)).clicked() {
-                    d.choose(prod, &ctx);
-                }
+            // Windows, and next to it the processor (x64 the first, the one most PCs have)
+            let win11 = matches!(d.product, Some(Product::Windows11 | Product::Windows11Arm));
+            let win10 = d.product == Some(Product::Windows10);
+            type Choice = (&'static str, Product, Arch);
+            let choices: [(&str, bool, [Choice; 2]); 2] = [
+                ("Windows 11", win11, [("x64", Product::Windows11, Arch::X64), ("Arm64", Product::Windows11Arm, Arch::Arm64)]),
+                ("Windows 10", win10, [("64-bit", Product::Windows10, Arch::X64), ("32-bit", Product::Windows10, Arch::X86)]),
+            ];
+            for (name, on, archs) in choices {
+                ui.horizontal(|ui| {
+                    if ui.radio(on, RichText::new(name).size(13.5).color(p.text)).clicked() && !on {
+                        let (_, prod, arch) = archs[0];
+                        d.choose(prod, arch, &ctx);
+                    }
+                    if on {
+                        ui.add_space(16.0);
+                        for (label, prod, arch) in archs {
+                            if ui.radio(d.product == Some(prod) && d.arch == Some(arch), RichText::new(label).size(13.0).color(p.text2)).clicked() {
+                                d.choose(prod, arch, &ctx);
+                            }
+                        }
+                    }
+                });
             }
-            ui.label(RichText::new("The 64-bit ISO of all editions (Home, Pro, Education…), as on microsoft.com.").size(11.5).color(p.text3));
+            ui.label(RichText::new("The ISO straight from Microsoft.").size(11.5).color(p.text3));
         });
         ui.add_space(10.0);
         if d.product.is_some() {

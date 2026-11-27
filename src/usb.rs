@@ -443,7 +443,9 @@ fn autounattend(o: &Options, arch: &str) -> String {
             .collect();
         xml.push_str(&format!("  <settings pass=\"windowsPE\">\n{}  </settings>\n", comp("Microsoft-Windows-Setup", &runs(&cmds))));
     }
-    let mut special = Vec::new();
+    // the apps and drivers built into an ISO by HeMiMizer: this file replaces the unattend.xml of the image that would
+    // start them, so it starts them itself (nothing happens when the image has none – iso_apps.rs)
+    let mut special = vec![crate::iso_apps::command("autounattend")];
     if o.bypass_msa {
         special.push(r"reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE /v BypassNRO /t REG_DWORD /d 1 /f".to_string());
     }

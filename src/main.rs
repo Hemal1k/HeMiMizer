@@ -19,6 +19,7 @@ mod options;
 mod ownership;
 mod downloads;
 mod iso;
+mod iso_apps;
 mod msiso;
 mod drivers;
 mod hardware;
@@ -117,16 +118,44 @@ fn main() -> eframe::Result {
     }
     // Debug builds only: the download links of Microsoft without the window (--test-msiso)
     if cfg!(debug_assertions) && args.first().map(String::as_str) == Some("--test-msiso") {
-        let r = msiso::start(msiso::Product::Windows11).and_then(|s| {
-            let langs = msiso::languages(&s)?;
-            let cz = langs.iter().find(|l| l.name == "Czech").cloned().ok_or("no Czech")?;
-            let (url, file) = msiso::link(&s, &cz)?;
-            Ok(format!("{} languages; {file}; {} bytes; {}", langs.len(), msiso::size(&url), &url[..60]))
-        });
-        println!("{r:?}");
+        use msiso::{Arch, Product};
+        for (product, arch) in [(Product::Windows11, Arch::X64), (Product::Windows11Arm, Arch::Arm64), (Product::Windows10, Arch::X64), (Product::Windows10, Arch::X86)] {
+            let r = msiso::start(product).and_then(|s| {
+                let langs = msiso::languages(&s)?;
+                let cz = langs.iter().find(|l| l.name == "Czech").cloned().ok_or("no Czech")?;
+                let (url, file) = msiso::link(&s, &cz, arch)?;
+                Ok(format!("{} languages; {file}; {} bytes", langs.len(), msiso::size(&url)))
+            });
+            println!("{product:?} {arch:?}: {r:?}");
+        }
         return Ok(());
     }
-    // Debug builds only: make a smaller ISO without the window (--test-iso <iso> <out iso> <out log>), the Pro edition
+    // Debug builds only: download a Windows ISO without the window
+    // (--test-download <win11|win11arm|win10|win10x86> <language, e.g. Czech> <folder> <out log>)
+    if cfg!(debug_assertions) && args.first().map(String::as_str) == Some("--test-download") && args.len() >= 5 {
+        use msiso::{Arch, Product};
+        let out = std::path::PathBuf::from(&args[4]);
+        let log = |t: String| {
+            let _ = std::fs::write(&out, t);
+        };
+        let (product, arch) = match args[1].as_str() {
+            "win11arm" => (Product::Windows11Arm, Arch::Arm64),
+            "win10" => (Product::Windows10, Arch::X64),
+            "win10x86" => (Product::Windows10, Arch::X86),
+            _ => (Product::Windows11, Arch::X64),
+        };
+        let r = msiso::start(product).and_then(|s| {
+            let lang = msiso::languages(&s)?.into_iter().find(|l| l.name == args[2]).ok_or("no such language")?;
+            let (url, file) = msiso::link(&s, &lang, arch)?;
+            let dest = std::path::Path::new(&args[3]).join(file);
+            msiso::download(&url, &dest, &|d, t| log(format!("{dest:?} {} of {} MB", d / 1_000_000, t / 1_000_000)))?;
+            Ok(dest)
+        });
+        log(format!("RESULT: {r:?}"));
+        return Ok(());
+    }
+    // Debug builds only: make a smaller ISO without the window, the Pro edition
+    // (--test-iso <iso> <out iso> <out log> [--apps id,id…] [--drivers id,id…] [--installers folder])
     if cfg!(debug_assertions) && args.first().map(String::as_str) == Some("--test-iso") && args.len() >= 4 {
         let out = std::path::PathBuf::from(&args[3]);
         let lines = std::sync::Mutex::new(Vec::<String>::new());
@@ -140,7 +169,21 @@ fn main() -> eframe::Result {
         let eds = iso::editions(&iso);
         log(format!("editions: {eds:?}"));
         let editions: Vec<(u32, String)> = eds.ok().and_then(|v| v.into_iter().find(|(_, n)| n.ends_with(" Pro"))).into_iter().collect();
-        let o = iso::Options { iso, editions, out: args[2].clone().into(), easy: true, chosen: iso::easy(), add_hemimizer: true, deep_clean: true, ..Default::default() };
+        let list = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).map(|v| v.split([',', ' ']).filter(|s| !s.is_empty()).map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
+        let o = iso::Options {
+            iso,
+            editions,
+            out: args[2].clone().into(),
+            easy: true,
+            chosen: iso::easy(),
+            add_hemimizer: true,
+            deep_clean: true,
+            winget: list("--apps"),
+            driver_dl: list("--drivers"),
+            installers: list("--installers").join(" "),
+            ..Default::default()
+        };
+        log(format!("apps {:?}, drivers {:?}, installers {:?}", o.winget, o.driver_dl, o.installers));
         let r = iso::build(&o, &log);
         log(format!("RESULT: {r:?}"));
         return Ok(());

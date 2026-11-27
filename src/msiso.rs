@@ -16,20 +16,25 @@ const INSTANCE: &str = "560dc9f3-1aa5-4a2f-b63c-9e18f8d0e175";
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Product {
     Windows11,
+    /// Windows 11 for Arm64 PCs: its own page and edition at Microsoft
+    Windows11Arm,
     Windows10,
 }
 
-impl Product {
-    pub fn name(self) -> &'static str {
-        match self {
-            Product::Windows11 => "Windows 11",
-            Product::Windows10 => "Windows 10",
-        }
-    }
+/// The processor the ISO is for: Windows 11 x64 or Arm64 (two products at Microsoft), Windows 10 64-bit or 32-bit (two
+/// links of one product).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Arch {
+    X64,
+    X86,
+    Arm64,
+}
 
+impl Product {
     fn page(self) -> &'static str {
         match self {
             Product::Windows11 => "https://www.microsoft.com/en-us/software-download/windows11",
+            Product::Windows11Arm => "https://www.microsoft.com/en-us/software-download/windows11arm64",
             Product::Windows10 => "https://www.microsoft.com/en-us/software-download/windows10ISO",
         }
     }
@@ -117,8 +122,8 @@ pub fn languages(s: &Session) -> Result<Vec<Language>, String> {
     if out.is_empty() { Err("Microsoft sent no languages".into()) } else { Ok(out) }
 }
 
-/// The link of the 64-bit ISO in that language (valid for 24 hours).
-pub fn link(s: &Session, lang: &Language) -> Result<(String, String), String> {
+/// The link of the ISO in that language for that processor (valid for 24 hours).
+pub fn link(s: &Session, lang: &Language, arch: Arch) -> Result<(String, String), String> {
     let t = get(
         s,
         &format!(
@@ -138,7 +143,12 @@ pub fn link(s: &Session, lang: &Language) -> Result<(String, String), String> {
         .flatten()
         .filter_map(|o| Some((o["Name"].as_str().unwrap_or("").to_string(), o["Uri"].as_str()?.to_string())))
         .collect();
-    let pick = opts.iter().find(|(n, u)| n.contains("64") || u.contains("x64")).or(opts.first()).cloned().ok_or("Microsoft sent no link")?;
+    // Windows 10: "IsoX64" / "IsoX86" (…_x64.iso / …_x32.iso); Windows 11 (x64 or Arm64): one link
+    let low = |x: &str| x.to_lowercase();
+    let pick = match arch {
+        Arch::X86 => opts.iter().find(|(n, u)| low(n).contains("x86") || low(u).contains("x32")).cloned().ok_or("Microsoft sent no 32-bit link")?,
+        _ => opts.iter().find(|(n, u)| n.contains("64") || u.contains("x64")).or(opts.first()).cloned().ok_or("Microsoft sent no link")?,
+    };
     let file = pick.1.split('?').next().and_then(|p| p.rsplit('/').next()).filter(|f| f.to_lowercase().ends_with(".iso")).unwrap_or("Windows.iso").to_string();
     Ok((pick.1, file))
 }

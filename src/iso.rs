@@ -1,6 +1,6 @@
 //! "Make a custom Windows ISO" – a Windows 11 ISO by HeMiMizer's own list (no third-party script): the editions chosen
 //! are taken from the ISO, apps are removed (Easy: all but a few; Custom: the ones ticked), the registry of each image
-//! gets the chosen settings, drivers and apps for the first sign-in may be added, the images are cleaned and
+//! gets the chosen settings, drivers and apps may be built in (iso_apps.rs), the images are cleaned and
 //! compressed, and a new bootable ISO (BIOS + UEFI) is made with oscdimg of Microsoft (downloaded from Microsoft's
 //! symbol server, its checksum checked).
 //!
@@ -187,10 +187,12 @@ pub struct Options {
     pub chosen: Vec<String>,
     /// drivers to add (a folder with .inf files), empty = none
     pub drivers: String,
-    /// winget ids installed at the first sign-in
+    /// winget ids built into the image (installed quietly while Windows sets itself up)
     pub winget: Vec<String>,
-    /// a folder whose installers (.exe, .msi) run one after another at the first sign-in, empty = none
+    /// a folder whose installers (.msi, and .exe of Inno Setup / NSIS / WiX) are built in too, empty = none
     pub installers: String,
+    /// the drivers downloaded and built in (ids of iso_apps::DRIVERS)
+    pub driver_dl: Vec<String>,
     /// HeMiMizer.exe on the desktop of the new Windows
     pub add_hemimizer: bool,
     pub compress: Compress,
@@ -290,7 +292,7 @@ pub fn cancelled() -> bool {
     CANCEL.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-fn go_on() -> Result<(), String> {
+pub(crate) fn go_on() -> Result<(), String> {
     if cancelled() { Err(CANCELLED.into()) } else { Ok(()) }
 }
 
@@ -499,6 +501,14 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
     log("Copying the ISO".into());
     let src = mount_iso(&o.iso)?;
     let img = image_in(&src).ok_or("This ISO has no install.wim or install.esd – is it Windows?")?;
+    // the apps and drivers first: a download that fails stops it before the long work
+    let installers = o.installer_files();
+    let prep = if o.winget.is_empty() && o.driver_dl.is_empty() && installers.is_empty() {
+        crate::iso_apps::Prepared::default()
+    } else {
+        let arch = image_arch(&img, o.editions[0].0);
+        crate::iso_apps::prepare(&o.winget, &o.driver_dl, &installers, &arch, w, log)?
+    };
     // made before the copy: its progress is measured on the disk of the folder
     std::fs::create_dir_all(&iso_dir).map_err(|e| format!("{}: {e}", iso_dir.display()))?;
     let total = crate::usb::folder_size(&src).saturating_sub(std::fs::metadata(&img).map(|m| m.len()).unwrap_or(0));
@@ -528,7 +538,7 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
     for (k, (_, name)) in o.editions.iter().enumerate() {
         let tag = format!("{name}{}", of(k, n));
         dism_p(&["/Mount-Image", &format!("/ImageFile:{}", wim.display()), &format!("/Index:{}", k + 1), &format!("/MountDir:{}", mount.display())], &format!("Opening {tag}"), log)?;
-        let r = customize(o, &mount, &tag, log, &mut reg_fail)?;
+        let r = customize(o, &prep, &mount, &tag, log, &mut reg_fail)?;
         removed = removed.max(r);
         dism_p(&["/Unmount-Image", &format!("/MountDir:{}", mount.display()), "/Commit"], &format!("Saving {tag}"), log)?;
     }
@@ -597,8 +607,8 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
     if n > 1 {
         text.push_str(&format!(" from each of {n} editions"));
     }
-    if !o.winget.is_empty() || !o.installer_files().is_empty() {
-        text.push_str("; your apps are installed at the first sign-in (Windows asks for administrator rights once)");
+    if !prep.names.is_empty() {
+        text.push_str(&format!("; built in: {} (installed while Windows sets itself up)", prep.names.join(", ")));
     }
     reg_fail.sort();
     reg_fail.dedup();
@@ -608,14 +618,17 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
     Ok(text)
 }
 
-/// The script of the first sign-in, in the image (Windows\Setup\Scripts: only administrators may change it there).
-const APPS_SCRIPT: &str = "HeMiMizer-apps.ps1";
-/// The folder of the installers next to it.
-const APPS_DIR: &str = "HeMiMizer-apps";
+/// The processor of an image ("x64", "arm64"; x64 when DISM does not say).
+fn image_arch(img: &Path, index: u32) -> String {
+    dism(&["/Get-WimInfo", &format!("/WimFile:{}", img.display()), &format!("/Index:{index}")])
+        .ok()
+        .and_then(|t| t.lines().find_map(|l| l.trim().strip_prefix("Architecture : ").map(|a| a.trim().to_lowercase())))
+        .unwrap_or_else(|| "x64".into())
+}
 
-/// One mounted image: its apps removed, its registry set, drivers and the apps of the first sign-in added, cleaned.
+/// One mounted image: its apps removed, its registry set, drivers, apps and drivers built in, cleaned.
 /// Returns how many apps were removed.
-fn customize(o: &Options, mount: &Path, tag: &str, log: &dyn Fn(String), reg_fail: &mut Vec<String>) -> Result<usize, String> {
+fn customize(o: &Options, prep: &crate::iso_apps::Prepared, mount: &Path, tag: &str, log: &dyn Fn(String), reg_fail: &mut Vec<String>) -> Result<usize, String> {
     let image = format!("/Image:{}", mount.display());
     let pkgs = dism(&[&image, "/Get-ProvisionedAppxPackages"])?;
     let names: Vec<&str> = pkgs.lines().filter_map(|l| l.trim().strip_prefix("PackageName : ")).map(str::trim).filter(|n| o.goes(n)).collect();
@@ -674,17 +687,6 @@ fn customize(o: &Options, mount: &Path, tag: &str, log: &dyn Fn(String), reg_fai
     if o.on("onedrive") {
         let _ = sys::exec("reg.exe", &["delete", r"HKLM\zDEFAULT\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "OneDriveSetup", "/f"]);
     }
-    // the apps of the first sign-in: RunOnce of the profile every new user starts from (no quotes needed: the paths have
-    // no spaces; cmd expands %SystemRoot%, and runs nothing once the script has removed itself)
-    let installers = o.installer_files();
-    let first_logon = !o.winget.is_empty() || !installers.is_empty();
-    if first_logon {
-        let script = format!(r"%SystemRoot%\Setup\Scripts\{APPS_SCRIPT}");
-        let cmd = format!(r"cmd.exe /c if exist {script} %SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File {script}");
-        if let Err(e) = sys::exec("reg.exe", &["add", r"HKLM\zDEFAULT\Software\Microsoft\Windows\CurrentVersion\RunOnce", "/v", "HeMiMizer apps", "/t", "REG_SZ", "/d", &cmd, "/f"]) {
-            reg_fail.push(e);
-        }
-    }
     for h in ["zSOFTWARE", "zSYSTEM", "zDEFAULT"] {
         let _ = sys::exec("reg.exe", &["unload", &format!(r"HKLM\{h}")]);
     }
@@ -694,20 +696,38 @@ fn customize(o: &Options, mount: &Path, tag: &str, log: &dyn Fn(String), reg_fai
         log(format!("Adding the drivers to {tag}"));
         dism(&[&image, "/Add-Driver", &format!("/Driver:{}", o.drivers.trim().trim_matches('"')), "/Recurse"])?;
     }
-    if first_logon {
-        log(format!("Adding your apps to {tag}"));
+    // app packages (MSIX) straight into the image
+    for (pkg, deps) in &prep.appx {
+        go_on()?;
+        log(format!("Adding {} to {tag}", pkg.file_name().unwrap_or_default().to_string_lossy()));
+        let mut args = vec![image.clone(), "/Add-ProvisionedAppxPackage".into(), format!("/PackagePath:{}", pkg.display()), "/SkipLicense".into()];
+        args.extend(deps.iter().map(|d| format!("/DependencyPackagePath:{}", d.display())));
+        dism(&args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    }
+    // the installers and their script (Windows\Setup\Scripts: only administrators may change it), started by
+    // Windows\Panther\unattend.xml (works with an OEM key) and by SetupComplete.cmd (when an autounattend.xml of the setup
+    // media replaced that file) – see iso_apps.rs
+    if prep.has_script() {
+        log(format!("Adding your apps and drivers to {tag}"));
         let scripts = mount.join(r"Windows\Setup\Scripts");
-        std::fs::create_dir_all(&scripts).map_err(|e| format!("{}: {e}", scripts.display()))?;
-        std::fs::write(scripts.join(APPS_SCRIPT), first_logon_script(&o.winget)).map_err(|e| format!("{APPS_SCRIPT}: {e}"))?;
-        if !installers.is_empty() {
-            let dir = scripts.join(APPS_DIR);
-            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-            for f in &installers {
-                if let Some(name) = f.file_name() {
-                    std::fs::copy(f, dir.join(name)).map_err(|e| format!("{}: {e}", f.display()))?;
-                }
-            }
+        crate::iso_apps::copy_dir(&prep.dir, &scripts.join(crate::iso_apps::DIR))?;
+        // UTF-8 with its mark: Windows PowerShell 5.1 reads the names of the installers right (e.g. "Intel®")
+        std::fs::write(scripts.join(crate::iso_apps::SCRIPT), format!("\u{feff}{}", crate::iso_apps::script(prep))).map_err(|e| format!("{}: {e}", crate::iso_apps::SCRIPT))?;
+        let panther = mount.join(r"Windows\Panther");
+        let file = panther.join("unattend.xml");
+        // an answer file of the image itself (rare in an ISO of Microsoft) is never overwritten
+        if file.exists() {
+            return Err(format!("{tag} already has Windows\\Panther\\unattend.xml – the apps cannot be added to it"));
         }
+        std::fs::create_dir_all(&panther).map_err(|e| format!("{}: {e}", panther.display()))?;
+        std::fs::write(&file, crate::iso_apps::unattend(&prep.arch)).map_err(|e| format!("unattend.xml: {e}"))?;
+        let cmd = scripts.join("SetupComplete.cmd");
+        let mut text = std::fs::read_to_string(&cmd).unwrap_or_else(|_| "@echo off\r\n".into());
+        if !text.ends_with('\n') {
+            text.push_str("\r\n");
+        }
+        text.push_str(&crate::iso_apps::setup_complete_line());
+        std::fs::write(&cmd, text).map_err(|e| format!("SetupComplete.cmd: {e}"))?;
     }
     if o.add_hemimizer && let Ok(exe) = std::env::current_exe() {
         let desk = mount.join(r"Users\Public\Desktop");
@@ -718,60 +738,6 @@ fn customize(o: &Options, mount: &Path, tag: &str, log: &dyn Fn(String), reg_fai
         dism_p(&[&image, "/Cleanup-Image", "/StartComponentCleanup", "/ResetBase"], &format!("Cleaning {tag} (this takes long)"), log)?;
     }
     Ok(removed)
-}
-
-/// The script of the first sign-in (ASCII, run by Windows PowerShell 5.1): it asks for administrator rights once (UAC),
-/// waits for winget (App Installer is set up for the new user in the first minutes), installs the winget packages,
-/// starts the installers of the folder one after another (the user clicks through them) and removes itself and the
-/// installers when everything went well – else it stays and tells where it is, to be run again.
-fn first_logon_script(ids: &[String]) -> String {
-    let list = ids.iter().filter(|i| valid_winget(i)).map(|i| format!("'{i}'")).collect::<Vec<_>>().join(", ");
-    let script = r#"# HeMiMizer: installs the apps chosen when this Windows ISO was made, once, at the first sign-in.
-$ErrorActionPreference = 'Continue'
-$me = $PSCommandPath
-$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $admin) {
-    try { Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$me`"") } catch { Write-Host 'Not installed: no administrator rights.' }
-    exit
-}
-$Host.UI.RawUI.WindowTitle = 'Installing your apps (HeMiMizer)'
-$ids = @(@@IDS@@)
-$failed = 0
-if ($ids.Count -gt 0) {
-    Write-Host 'Waiting for winget (App Installer)...'
-    for ($i = 0; $i -lt 120; $i++) {
-        if (Get-Command winget.exe -ErrorAction SilentlyContinue) { break }
-        if ($i -eq 6) { try { Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe } catch { } }
-        Start-Sleep -Seconds 5
-    }
-    foreach ($id in $ids) {
-        Write-Host ''
-        Write-Host "== $id"
-        winget install --id $id --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-        if ($LASTEXITCODE -ne 0) { $failed++; Write-Host "   not installed (code $LASTEXITCODE)" -ForegroundColor Yellow }
-    }
-}
-$dir = Join-Path $PSScriptRoot '@@DIR@@'
-if (Test-Path -LiteralPath $dir) {
-    Get-ChildItem -LiteralPath $dir -File | Sort-Object Name | ForEach-Object {
-        Write-Host ''
-        Write-Host "== $($_.Name)"
-        if ($_.Extension -ieq '.msi') { $p = Start-Process -FilePath "$env:SystemRoot\System32\msiexec.exe" -ArgumentList @('/i', "`"$($_.FullName)`"") -Wait -PassThru }
-        else { $p = Start-Process -FilePath $_.FullName -Wait -PassThru }
-        if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { $failed++; Write-Host "   ended with code $($p.ExitCode)" -ForegroundColor Yellow }
-    }
-}
-Write-Host ''
-if ($failed -eq 0) {
-    Write-Host 'Done.' -ForegroundColor Green
-    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $me -Force -ErrorAction SilentlyContinue
-} else {
-    Write-Host "$failed did not install. Run this again later (right-click, Run with PowerShell): $me" -ForegroundColor Yellow
-}
-Read-Host 'Press Enter to close'
-"#;
-    script.replace("@@IDS@@", &list).replace("@@DIR@@", APPS_DIR).replace('\n', "\r\n")
 }
 
 /// oscdimg.exe of Microsoft (version 2.56, part of the Windows ADK), from Microsoft's symbol server. The files there carry
@@ -864,13 +830,10 @@ mod tests {
     }
 
     #[test]
-    fn winget_ids_and_script() {
+    fn winget_ids_are_read() {
         assert_eq!(winget_ids("Mozilla.Firefox, VideoLAN.VLC;7zip.7zip\n"), vec!["Mozilla.Firefox", "VideoLAN.VLC", "7zip.7zip"]);
         assert!(valid_winget("Notepad++.Notepad++"));
         assert!(!valid_winget("a'; rm"));
-        let s = first_logon_script(&["Mozilla.Firefox".into(), "bad'id".into()]);
-        assert!(s.contains("$ids = @('Mozilla.Firefox')"));
-        assert!(s.contains("'HeMiMizer-apps'") && s.is_ascii());
     }
 
     #[test]
