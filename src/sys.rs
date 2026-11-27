@@ -288,7 +288,8 @@ static LOG: std::sync::Mutex<Option<(PathBuf, std::fs::File)>> = std::sync::Mute
 
 /// Debug builds: HeMiMizer.log in "HeMiMizer data" next to HeMiMizer.exe; %LOCALAPPDATA%\HeMiMizer when that folder is
 /// read-only. The release writes one only when Settings → Logging is on (off by default – the user, 2026-11-18: nothing
-/// of HeMiMizer stays on the PC unless asked): %AppData%\HeMi\HeMiMizer\HeMiMizer.log, over 1 MB started anew.
+/// of HeMiMizer stays on the PC unless asked): %AppData%\HeMi\HeMiMizer\log.txt as in the other HeMi apps – at most
+/// 1 MB (then the older half goes), the folders of the user as %USERPROFILE%.
 pub fn log_init() {
     if !cfg!(debug_assertions) {
         if crate::look::Look::load().logging {
@@ -324,14 +325,63 @@ pub fn log_on() {
         return;
     }
     let Some(dir) = crate::look::dir() else { return };
-    let p = dir.join("HeMiMizer.log");
+    let p = dir.join("log.txt");
     let _ = std::fs::create_dir_all(&dir);
-    if std::fs::metadata(&p).is_ok_and(|m| m.len() > 1_000_000) {
-        let _ = std::fs::remove_file(&p);
-    }
     if let Ok(f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
         *LOG.lock().unwrap() = Some((p, f));
     }
+    RELEASE_LOG.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// The log of the released HeMiMizer is on: kept under 1 MB and without the folders of the user.
+static RELEASE_LOG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+const LOG_LIMIT: u64 = 1024 * 1024;
+
+/// The newer half of the log, from the start of a line.
+fn newer_half(log: &[u8]) -> &[u8] {
+    let keep = (LOG_LIMIT / 2) as usize;
+    if log.len() <= keep {
+        return log;
+    }
+    let tail = &log[log.len() - keep..];
+    tail.iter().position(|&b| b == b'\n').map_or(&[][..], |i| &tail[i + 1..])
+}
+
+/// A line without the folders of the user (the released log; the Debug one keeps them for finding errors).
+fn scrub(text: &str) -> String {
+    let mut s = text.to_string();
+    for (var, name) in [("LOCALAPPDATA", "%LocalAppData%"), ("APPDATA", "%AppData%"), ("USERPROFILE", "%USERPROFILE%")] {
+        if let Some(v) = std::env::var_os(var).map(|v| v.to_string_lossy().trim_end_matches('\\').to_string())
+            && v.len() > 3
+        {
+            s = replace_ci(&s, &v, name);
+        }
+    }
+    if let Ok(user) = std::env::var("USERNAME")
+        && !user.is_empty()
+    {
+        s = replace_ci(&s, &format!(r"\Users\{user}"), r"\Users\<user>");
+    }
+    s
+}
+
+/// `needle` replaced in any case of its ASCII letters (paths of Windows).
+fn replace_ci(hay: &str, needle: &str, with: &str) -> String {
+    let mut out = String::with_capacity(hay.len());
+    let mut i = 0;
+    while i < hay.len() {
+        if let Some(part) = hay.get(i..i + needle.len())
+            && part.eq_ignore_ascii_case(needle)
+        {
+            out.push_str(with);
+            i += needle.len();
+            continue;
+        }
+        let Some(c) = hay[i..].chars().next() else { break };
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
 }
 
 /// Closes the log file (it can be moved then); later lines are not written.
@@ -354,7 +404,20 @@ pub fn log(text: &str) {
         st
     };
     let stamp = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
-    if let Some((_, f)) = LOG.lock().unwrap().as_mut() {
+    let release = RELEASE_LOG.load(std::sync::atomic::Ordering::SeqCst);
+    let text = if release { scrub(text) } else { text.to_string() };
+    let mut log = LOG.lock().unwrap();
+    if release
+        && let Some((p, f)) = log.as_mut()
+        && f.metadata().is_ok_and(|m| m.len() > LOG_LIMIT)
+        && let Ok(old) = std::fs::read(&*p)
+    {
+        let _ = std::fs::write(&*p, newer_half(&old));
+        if let Ok(nf) = std::fs::OpenOptions::new().append(true).open(&*p) {
+            *f = nf;
+        }
+    }
+    if let Some((_, f)) = log.as_mut() {
         let _ = writeln!(f, "{stamp}  {}", text.replace('\n', "\n                     "));
     }
 }

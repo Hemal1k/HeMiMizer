@@ -4,11 +4,13 @@
 //! - FAT32: one partition, which every UEFI starts from. FAT32 holds no file over 4 GB: a bigger install.wim is split
 //!   by DISM into install.swm parts (Windows Setup reads them); any other file that big (an install.esd) needs NTFS.
 //!   Windows formats FAT32 only up to 32 GB, so a bigger stick gets a 32 GB partition.
-//! - NTFS: two partitions, as Microsoft describes it for big images – a small FAT32 "BOOT" with only what starts the
-//!   PC (boot, efi, bootmgr, bootmgr.efi and sources\boot.wim, plus autounattend.xml), which UEFI and BIOS start from,
-//!   and an NTFS one with all the files; Windows Setup (inside boot.wim) looks for install.wim / install.esd on every
-//!   drive and finds it there. The folder support, setup.exe and autorun.inf are only on the NTFS partition (they are
-//!   for running Setup from a running Windows, which is done from that partition).
+//! - NTFS: two partitions, as Microsoft describes it for big images – a small FAT32 "BOOT" with everything but the
+//!   folder sources (and with sources\boot.wim), which UEFI and BIOS start from, and an NTFS one with all the files;
+//!   Windows Setup finds install.wim there. (Only the start files on BOOT was tried in 1.7.0 and taken back: it saved a
+//!   few MB and left the way Microsoft describes.)
+//! - GPT + NTFS may hide BOOT (on by default): the GPT attribute "no drive letter", so neither Windows nor Windows
+//!   Setup gives it a letter – UEFI does not read the attribute and still starts from it. autounattend.xml is on the
+//!   NTFS partition too, where Setup finds it then.
 //! - MBR: the (boot) partition is active and gets the boot code of Windows (bootsect from the ISO) for BIOS.
 //! - The ISO is opened without a drive letter (into a hidden folder), so no new drive pops up while it works.
 //! - The choices of the installation go into autounattend.xml at the root of the stick (as Rufus does): no TPM 2.0 /
@@ -120,6 +122,8 @@ pub struct Options {
     pub region: Option<Region>,
     pub no_privacy: bool,
     pub no_bitlocker: bool,
+    /// GPT + NTFS: BOOT gets no drive letter (hidden in File Explorer)
+    pub hide_boot: bool,
 }
 
 impl Options {
@@ -254,12 +258,11 @@ fn make_from(o: &Options, src: &Path, log: &dyn Fn(String)) -> Result<String, St
 
     let total = folder_size(src);
     match &data {
-        // NTFS: all on the big partition; on BOOT only the start files (no sources but boot.wim, no support, setup.exe
-        // and autorun.inf)
+        // NTFS: all on the big partition; the start files (no sources but boot.wim) on BOOT
         Some(d) => {
             copy(src, d, &[], &[], total, "Copying the files", log)?;
             log("Copying the start files".into());
-            copy(src, &boot, &["sources", "support"], &[src.join("setup.exe"), src.join("autorun.inf")], 0, "", log)?;
+            copy(src, &boot, &["sources"], &[], 0, "", log)?;
             std::fs::create_dir_all(boot.join("sources")).map_err(|e| e.to_string())?;
             std::fs::copy(src.join(r"sources\boot.wim"), boot.join(r"sources\boot.wim")).map_err(|e| format!("boot.wim: {e}"))?;
         }
@@ -302,6 +305,21 @@ fn make_from(o: &Options, src: &Path, log: &dyn Fn(String)) -> Result<String, St
             std::fs::write(root.join("autounattend.xml"), &xml).map_err(|e| format!("autounattend.xml: {e}"))?;
         }
     }
+    let mut hidden = false;
+    if o.hide_boot && o.gpt && data.is_some() {
+        log("Hiding the BOOT partition".into());
+        let l = boot.display().to_string().chars().next().unwrap_or('?');
+        // the attribute first (it stays on the stick), then the letter it has now
+        let r = sys::ps(&format!(
+            "$p = Get-Partition -DriveLetter {l}\n\
+             Set-Partition -InputObject $p -NoDefaultDriveLetter $true\n\
+             Remove-PartitionAccessPath -InputObject $p -AccessPath '{l}:\\'"
+        ));
+        hidden = r.is_ok();
+        if let Err(e) = r {
+            sys::log(&format!("usb: BOOT not hidden: {e}"));
+        }
+    }
     log("Done".into());
     let d = data.as_ref().unwrap_or(&boot).display().to_string();
     Ok(format!(
@@ -309,7 +327,7 @@ fn make_from(o: &Options, src: &Path, log: &dyn Fn(String)) -> Result<String, St
         d.trim_end_matches('\\'),
         if o.ntfs { "NTFS" } else { "FAT32" },
         if o.unattended() { ", with your choices for the installation" } else { "" }
-    ))
+    ) + if o.hide_boot && o.gpt && data.is_some() && !hidden { " (the BOOT partition could not be hidden)" } else { "" })
 }
 
 fn drive(letter: &str) -> Result<PathBuf, String> {
@@ -350,6 +368,12 @@ pub(crate) fn copy(from: &Path, to: &Path, skip_dirs: &[&str], skip_files: &[Pat
         if let Some(s) = child.try_wait().map_err(|e| e.to_string())? {
             break s.code().unwrap_or(16);
         }
+        // Cancel of the custom ISO (a USB stick is not cancelled: it would be left half made)
+        if crate::iso::cancelled() && to.to_string_lossy().contains("HeMiMizer-ISO") {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(crate::iso::CANCELLED.into());
+        }
         if total > 0 {
             let done = used(to).saturating_sub(before).min(total);
             log(format!("{what} – {:.1} of {:.1} GB ({}%)", done as f64 / 1e9, total as f64 / 1e9, done * 100 / total));
@@ -365,6 +389,16 @@ pub(crate) fn copy(from: &Path, to: &Path, skip_dirs: &[&str], skip_files: &[Pat
 pub(crate) fn folder_size(p: &Path) -> u64 {
     let Ok(rd) = std::fs::read_dir(p) else { return 0 };
     rd.flatten().map(|e| if e.path().is_dir() { folder_size(&e.path()) } else { e.metadata().map(|m| m.len()).unwrap_or(0) }).sum()
+}
+
+/// The free space of the drive of `path` (0 when it cannot be read).
+pub(crate) fn free(path: &Path) -> u64 {
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let w = sys::wide(&path.display().to_string());
+    let mut free = 0u64;
+    // SAFETY: `w` ends with a NUL; the out pointer is a valid local, the others null (allowed)
+    unsafe { GetDiskFreeSpaceExW(w.as_ptr(), &mut free, std::ptr::null_mut(), std::ptr::null_mut()) };
+    free
 }
 
 /// What is on the drive now (its size less the free space).

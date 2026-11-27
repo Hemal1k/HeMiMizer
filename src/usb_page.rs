@@ -33,6 +33,8 @@ pub struct UsbUi {
     pub lists: Shared<RegionLists>,
     pub no_privacy: bool,
     pub no_bitlocker: bool,
+    /// GPT + NTFS: the small BOOT partition without a drive letter
+    pub hide_boot: bool,
     /// the question "everything on … is erased" is open
     pub asking: bool,
     /// None = not started; Some((what it does now, None while it runs / the result))
@@ -42,7 +44,7 @@ pub struct UsbUi {
 impl UsbUi {
     pub fn new() -> UsbUi {
         // GPT with NTFS by default (big images fit), MBR with FAT32
-        UsbUi { gpt: true, ntfs: true, label: "WINDOWS".into(), bypass_hw: true, bypass_msa: true, user: "user".into(), no_privacy: true, ..Default::default() }
+        UsbUi { gpt: true, ntfs: true, label: "WINDOWS".into(), bypass_hw: true, bypass_msa: true, user: "user".into(), no_privacy: true, hide_boot: true, ..Default::default() }
     }
 
     pub fn running(&self) -> bool {
@@ -74,6 +76,7 @@ impl UsbUi {
             region: self.region_on.then(|| Region { culture: self.culture.clone(), time_zone: self.time_zone.clone() }),
             no_privacy: self.no_privacy,
             no_bitlocker: self.no_bitlocker,
+            hide_boot: self.hide_boot,
         }
     }
 
@@ -194,6 +197,13 @@ impl HeMiMizerApp {
                 .size(11.5)
                 .color(p.text3),
             );
+            if u.ntfs {
+                ui.add_space(4.0);
+                ui.add_enabled_ui(u.gpt, |ui| {
+                    ui.checkbox(&mut u.hide_boot, "Hide the small BOOT partition (no drive letter)")
+                        .on_disabled_hover_text("Only with GPT – an MBR stick shows both partitions.");
+                });
+            }
             ui.add_space(4.0);
             row_layout(ui, 30.0, |ui| {
                 ui.label(RichText::new("Name").size(13.5).color(p.text));

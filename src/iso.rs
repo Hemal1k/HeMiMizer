@@ -81,7 +81,7 @@ pub const APPS: &[App] = &[
 ];
 
 /// Easy: the apps that stay (Microsoft Store, App Installer, Windows Security, Terminal, Notepad, Photos, Media Player,
-/// Snipping Tool); every other app goes, except [`FRAMEWORKS`] (and Edge, which has its own choice).
+/// Snipping Tool, Calculator); every other app goes, except [`FRAMEWORKS`] (and Edge, which has its own choice).
 pub const EASY_KEEP: &[&str] = &[
     "Microsoft.WindowsStore",
     "Microsoft.StorePurchaseApp",
@@ -92,6 +92,7 @@ pub const EASY_KEEP: &[&str] = &[
     "Microsoft.Windows.Photos",
     "Microsoft.ZuneMusic",
     "Microsoft.ScreenSketch",
+    "Microsoft.WindowsCalculator",
 ];
 
 /// Parts of the names of packages that other apps need (libraries, runtimes, codecs, language packs): never removed.
@@ -268,6 +269,66 @@ pub fn percent(s: &[u8]) -> Option<f32> {
     t.parse::<f32>().ok().filter(|p| (0.0..=100.0).contains(p))
 }
 
+/// Cancel was clicked (the page "Make a custom Windows ISO"); the program that works now (DISM, robocopy, oscdimg).
+static CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static CHILD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The result of a cancelled run.
+pub const CANCELLED: &str = "Cancelled – nothing was made and the work folder is cleaned up.";
+
+/// Cancels the ISO being made: the program working now ends (with its own programs, DismHost), the next step does not
+/// start, and `build` cleans up as after an error.
+pub fn cancel() {
+    use std::sync::atomic::Ordering;
+    CANCEL.store(true, Ordering::SeqCst);
+    let pid = CHILD.swap(0, Ordering::SeqCst);
+    if pid != 0 {
+        let _ = sys::exec("taskkill.exe", &["/PID", &pid.to_string(), "/T", "/F"]);
+    }
+}
+
+pub fn cancelled() -> bool {
+    CANCEL.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn go_on() -> Result<(), String> {
+    if cancelled() { Err(CANCELLED.into()) } else { Ok(()) }
+}
+
+/// A program of the run started (0 = it ended): Cancel ends it.
+pub(crate) fn working(pid: u32) {
+    CHILD.store(pid, std::sync::atomic::Ordering::SeqCst);
+    // cancelled while it was starting
+    if pid != 0 && cancelled() {
+        cancel();
+    }
+}
+
+/// The free space the work folder needs on the system disk (the copy of the ISO, the editions, one of them opened).
+pub const WORK_SPACE: u64 = 25_000_000_000;
+
+/// What is missing for making the ISO: too little space on the system disk, or for the new ISO on its own drive.
+pub fn space_problem(o: &Options) -> Option<String> {
+    let w = work();
+    let sys_drive = w.ancestors().last().unwrap_or(&w).to_path_buf();
+    let have = crate::usb::free(&sys_drive);
+    let iso = std::fs::metadata(&o.iso).map(|m| m.len()).unwrap_or(0);
+    let gb = |b: u64| b as f64 / 1e9;
+    let out_root = o.out.ancestors().last().map(Path::to_path_buf).unwrap_or_default();
+    let same = out_root.display().to_string().eq_ignore_ascii_case(&sys_drive.display().to_string());
+    // the new ISO is about as big as the one of Microsoft, at most
+    let need = WORK_SPACE + if same { iso } else { 0 };
+    if have > 0 && have < need {
+        return Some(format!("Only {:.0} GB free on {} – it needs about {:.0} GB while it works.", gb(have), sys_drive.display(), gb(need)));
+    }
+    if !same && out_root.exists() {
+        let out_free = crate::usb::free(&out_root);
+        if out_free > 0 && out_free < iso {
+            return Some(format!("Only {:.1} GB free on {} for the new ISO – it needs about {:.1} GB.", gb(out_free), out_root.display(), gb(iso)));
+        }
+    }
+    None
+}
+
 fn work() -> PathBuf {
     PathBuf::from(format!(r"{}\HeMiMizer-ISO", sys::env("SystemDrive", "C:")))
 }
@@ -313,6 +374,7 @@ pub fn run_progress(exe: &str, args: &[&str], what: &str, log: &dyn Fn(String)) 
     // the write ends of this process closed, so that the reading ends when the program does
     drop(cmd);
     let mut child = child.map_err(|e| format!("{exe}: {e}"))?;
+    working(child.id());
     let mut all = Vec::new();
     let mut buf = [0u8; 4096];
     let mut last = -1i32;
@@ -332,9 +394,11 @@ pub fn run_progress(exe: &str, args: &[&str], what: &str, log: &dyn Fn(String)) 
         }
     }
     let code = child.wait().map_err(|e| e.to_string())?.code().unwrap_or(-1);
+    working(0);
     let text = String::from_utf8_lossy(&all).into_owned();
     let shown: String = text.split(['\r', '\n']).map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('[')).collect::<Vec<_>>().join("\n").chars().take(3000).collect();
     sys::log(&format!("< code {code} after {:.1} s\n{shown}", started.elapsed().as_secs_f32()));
+    go_on()?;
     Ok(sys::Output { code, text })
 }
 
@@ -381,6 +445,10 @@ pub fn editions(iso: &Path) -> Result<Vec<(u32, String)>, String> {
 
 /// Makes the ISO; `log` tells what it does.
 pub fn build(o: &Options, log: &dyn Fn(String)) -> Result<String, String> {
+    CANCEL.store(false, std::sync::atomic::Ordering::SeqCst);
+    if let Some(p) = space_problem(o) {
+        return Err(p);
+    }
     let w = work();
     cleanup(&w);
     // made anew with permissions only for administrators: a folder in the root of C: may otherwise be changed by every
@@ -389,8 +457,11 @@ pub fn build(o: &Options, log: &dyn Fn(String)) -> Result<String, String> {
     std::fs::create_dir_all(w.join("mount")).map_err(|e| format!("{}: {e}", w.display()))?;
     let r = run(o, &w, log);
     if r.is_err() {
-        log("Cleaning up after the error".into());
+        log(if cancelled() { "Cancelled – cleaning up" } else { "Cleaning up after the error" }.into());
     }
+    let r = if cancelled() && r.is_err() { Err(CANCELLED.to_string()) } else { r };
+    // a USB stick made later runs DISM through run_progress too: not cancelled by this
+    CANCEL.store(false, std::sync::atomic::Ordering::SeqCst);
     cleanup(&w);
     dismount_iso(&o.iso);
     r
@@ -495,6 +566,7 @@ fn run(o: &Options, w: &Path, log: &dyn Fn(String)) -> Result<String, String> {
         dism_p(&["/Unmount-Image", &format!("/MountDir:{}", bm.display()), "/Commit"], "Setup without the hardware check: saving it", log)?;
     }
 
+    go_on()?;
     log("Making the ISO".into());
     let oscdimg = oscdimg(w)?;
     let etfs = iso_dir.join(r"boot\etfsboot.com");
@@ -549,6 +621,7 @@ fn customize(o: &Options, mount: &Path, tag: &str, log: &dyn Fn(String), reg_fai
     let names: Vec<&str> = pkgs.lines().filter_map(|l| l.trim().strip_prefix("PackageName : ")).map(str::trim).filter(|n| o.goes(n)).collect();
     let mut removed = 0;
     for (k, n) in names.iter().enumerate() {
+        go_on()?;
         log(format!("Removing the apps of {tag} – {} of {} ({}%)", k + 1, names.len(), k * 100 / names.len()));
         if dism(&[&image, "/Remove-ProvisionedAppxPackage", &format!("/PackageName:{n}")]).is_ok() {
             removed += 1;
@@ -567,6 +640,7 @@ fn customize(o: &Options, mount: &Path, tag: &str, log: &dyn Fn(String), reg_fai
     }
 
     // the registry of the image
+    go_on()?;
     log(format!("Setting up the registry of {tag}"));
     hive("SOFTWARE", &mount.join(r"Windows\System32\config\SOFTWARE"))?;
     hive("SYSTEM", &mount.join(r"Windows\System32\config\SYSTEM"))?;
@@ -756,6 +830,7 @@ mod tests {
             "Microsoft.Windows.Photos_24.24010.29003.0_neutral_~_8wekyb3d8bbwe",
             "Microsoft.ZuneMusic_11.2408.12.0_neutral_~_8wekyb3d8bbwe",
             "Microsoft.ScreenSketch_2022.2409.25.0_neutral_~_8wekyb3d8bbwe",
+            "Microsoft.WindowsCalculator_2021.2409.0.0_neutral_~_8wekyb3d8bbwe",
             "Microsoft.DesktopAppInstaller_2024.709.2344.0_neutral_~_8wekyb3d8bbwe",
             "Microsoft.VCLibs.140.00_14.0.33519.0_x64__8wekyb3d8bbwe",
             "Microsoft.HEIFImageExtension_1.0.63001.0_x64__8wekyb3d8bbwe",
@@ -768,7 +843,7 @@ mod tests {
             "Clipchamp.Clipchamp_2.2.8.0_neutral_~_yxz26nhyzhsrt",
             "Microsoft.BingNews_4.55.62231.0_x64__8wekyb3d8bbwe",
             "Microsoft.Copilot_1.0.3.0_neutral_~_8wekyb3d8bbwe",
-            "Microsoft.WindowsCalculator_2021.2409.0.0_neutral_~_8wekyb3d8bbwe",
+            "Microsoft.Paint_11.2410.28.0_neutral_~_8wekyb3d8bbwe",
             "MicrosoftWindows.Client.WebExperience_424.1301.270.9_neutral_~_cw5n1h2txyewy",
         ] {
             assert!(o.goes(gone), "{gone}");

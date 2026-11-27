@@ -101,6 +101,15 @@ impl HeMiMizerApp {
                             ui.add_space(6.0);
                             ui.add(egui::ProgressBar::new(*done as f32 / *total as f32).desired_height(6.0).fill(p.accent));
                         }
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("You can stop it and go on later from where it stopped.").size(12.0).color(p.text3));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if Btn::new("Stop").show(ui, &p).clicked() {
+                                    acts.push(Action::DlStop);
+                                }
+                            });
+                        });
                     });
                 }
                 Some(Ok(iso)) => {
@@ -114,6 +123,9 @@ impl HeMiMizerApp {
                             acts.push(Action::DlToIso(iso.display().to_string()));
                         }
                     });
+                }
+                Some(Err(e)) if e == msiso::STOPPED_TEXT => {
+                    info_bar(ui, &p, Tone::Caution, e, None);
                 }
                 Some(Err(e)) => {
                     info_bar(ui, &p, Tone::Critical, &format!("Not downloaded: {e}"), None);

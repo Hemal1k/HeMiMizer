@@ -162,6 +162,7 @@ pub fn download(url: &str, dest: &Path, progress: &dyn Fn(u64, u64)) -> Result<(
         .creation_flags(0x0800_0000)
         .spawn()
         .map_err(|e| format!("curl: {e}"))?;
+    STOPPED.store(false, std::sync::atomic::Ordering::SeqCst);
     RUNNING.store(child.id(), std::sync::atomic::Ordering::SeqCst);
     let code = loop {
         if let Some(st) = child.try_wait().map_err(|e| e.to_string())? {
@@ -170,6 +171,10 @@ pub fn download(url: &str, dest: &Path, progress: &dyn Fn(u64, u64)) -> Result<(
         progress(std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0), total);
         std::thread::sleep(std::time::Duration::from_millis(700));
     };
+    RUNNING.store(0, std::sync::atomic::Ordering::SeqCst);
+    if STOPPED.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(STOPPED_TEXT.into());
+    }
     if code != 0 {
         return Err(format!("The download stopped (curl {code}) – start it again, it goes on where it stopped"));
     }
@@ -186,10 +191,15 @@ impl Drop for Session {
 /// The curl of a download that runs (0 = none): stopped when HeMiMizer closes, else it went on without the window.
 static RUNNING: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// Stop was clicked (not an error of the download).
+static STOPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub const STOPPED_TEXT: &str = "Stopped. Download again to go on where it stopped.";
+
 /// Stops a download that runs (the .part file stays: the next start goes on from it).
 pub fn stop() {
     let pid = RUNNING.swap(0, std::sync::atomic::Ordering::SeqCst);
     if pid != 0 {
+        STOPPED.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = std::process::Command::new(crate::sys::program("taskkill.exe")).args(["/PID", &pid.to_string(), "/F"]).creation_flags(0x0800_0000).status();
     }
 }

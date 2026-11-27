@@ -159,6 +159,7 @@ fn main() -> eframe::Result {
             ntfs: args.get(4).is_none_or(|a| a != "fat32"),
             no_privacy: true,
             no_bitlocker: true,
+            hide_boot: true,
         };
         let out = std::path::PathBuf::from(&args[3]);
         let lines = std::sync::Mutex::new(Vec::<String>::new());

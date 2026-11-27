@@ -490,7 +490,11 @@ fn write_todo() -> Option<PathBuf> {
             t.push_str("\r\n");
         }
     }
-    t.push_str(tr("\r\nThe details are in HeMiMizer.log.\r\n", "\r\nPodrobnosti jsou v HeMiMizer.log.\r\n"));
+    // only when a log is written (Debug, or Settings → Logging on)
+    let log = sys::log_path();
+    if !log.as_os_str().is_empty() {
+        t.push_str(&format!("{} {}\r\n", tr("\r\nThe details are in", "\r\nPodrobnosti jsou v"), log.display()));
+    }
     let file = dir.join(tr("HeMiMizer - to do by hand.txt", "HeMiMizer - udělat ručně.txt"));
     let mut bytes = vec![0xEF, 0xBB, 0xBF];
     bytes.extend_from_slice(t.as_bytes());

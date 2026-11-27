@@ -72,7 +72,12 @@ impl IsoUi {
     }
 
     pub fn ready(&self) -> bool {
-        self.iso_path().is_file() && !self.picked_editions().is_empty() && !self.out.trim().is_empty() && self.bad_winget().is_empty() && !self.running()
+        self.iso_path().is_file()
+            && !self.picked_editions().is_empty()
+            && !self.out.trim().is_empty()
+            && self.bad_winget().is_empty()
+            && !self.running()
+            && iso::space_problem(&self.options()).is_none()
     }
 
     pub fn options(&self) -> iso::Options {
@@ -156,11 +161,22 @@ impl HeMiMizerApp {
                             ui.add(egui::ProgressBar::new(pc / 100.0).desired_height(6.0).fill(p.accent));
                         }
                         ui.add_space(4.0);
-                        ui.label(RichText::new("It takes 20–60 minutes. The PC can be used meanwhile; do not close HeMiMizer.").size(12.0).color(p.text3));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("It takes 20–60 minutes. The PC can be used meanwhile; do not close HeMiMizer.").size(12.0).color(p.text3));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let busy = iso::cancelled();
+                                if Btn::new(if busy { "Cancelling…" } else { "Cancel" }).enabled(!busy).show(ui, &p).clicked() {
+                                    acts.push(Action::IsoCancel);
+                                }
+                            });
+                        });
                     });
                 }
                 Some(Ok(t)) => {
                     info_bar(ui, &p, Tone::Success, &format!("Done: {t}. Make a USB stick from it on the first page."), None);
+                }
+                Some(Err(e)) if e == iso::CANCELLED => {
+                    info_bar(ui, &p, Tone::Caution, e, None);
                 }
                 Some(Err(e)) => {
                     info_bar(ui, &p, Tone::Critical, &format!("Not made: {e}"), None);
@@ -226,7 +242,7 @@ impl HeMiMizerApp {
         card(ui, &p, |ui| {
             ui.radio_value(&mut s.custom, false, RichText::new("Easy – recommended").size(13.5).color(p.text));
             ui.label(
-                RichText::new("      Only Store, Windows Security, Terminal, Notepad, Photos, Media Player and Snipping Tool stay. No ads, AI or OneDrive; installs without TPM and a Microsoft account.")
+                RichText::new("      Only Store, Windows Security, Terminal, Notepad, Photos, Media Player, Snipping Tool and Calculator stay. No ads, AI or OneDrive; installs without TPM and a Microsoft account.")
                     .size(12.0)
                     .color(p.text2),
             );
@@ -317,6 +333,13 @@ impl HeMiMizerApp {
             ui.add(egui::TextEdit::singleline(&mut s.out).desired_width(f32::INFINITY).margin(vec2(8.0, 6.0)));
         });
         ui.add_space(4.0);
-        ui.label(RichText::new("Needs about 25 GB free on the system disk while it works.").size(12.0).color(p.text3));
+        match iso::space_problem(&s.options()) {
+            Some(problem) if s.iso_path().is_file() => {
+                ui.label(RichText::new(problem).size(12.0).color(p.critical));
+            }
+            _ => {
+                ui.label(RichText::new("Needs about 25 GB free on the system disk while it works.").size(12.0).color(p.text3));
+            }
+        }
     }
 }

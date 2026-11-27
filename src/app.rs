@@ -118,6 +118,7 @@ enum Action {
     DlOpen,
     DlBrowse,
     DlStart,
+    DlStop,
     DlToUsb(String),
     DlToIso(String),
     IsoOpen,
@@ -125,6 +126,7 @@ enum Action {
     IsoDrivers,
     IsoInstallers,
     IsoMake,
+    IsoCancel,
     Start,
     Quit,
     AskReboot,
@@ -601,7 +603,7 @@ impl HeMiMizerApp {
         section(ui, &p, "Troubleshooting");
         card(ui, &p, |ui| {
             row_layout(ui, 52.0, |ui| {
-                crate::widgets::two_lines(ui, &p, "Logging", "Writes what HeMiMizer does to HeMiMizer.log (no passwords). Off by default.");
+                crate::widgets::two_lines(ui, &p, "Logging", "Writes what HeMiMizer does to log.txt (no passwords, no user folders). Off by default.");
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if crate::widgets::toggle(ui, &p, self.look.logging || cfg!(debug_assertions)).clicked() {
                         acts.push(Action::SetLogging(!self.look.logging));
@@ -2451,6 +2453,8 @@ impl HeMiMizerApp {
                     }
                 }
                 Action::DlStart => self.dl.start(ctx),
+                Action::DlStop => crate::msiso::stop(),
+                Action::IsoCancel => crate::iso::cancel(),
                 Action::DlToUsb(iso) => {
                     self.usb.iso = iso;
                     self.phase = Phase::Usb;
